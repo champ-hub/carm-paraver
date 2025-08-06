@@ -3,8 +3,8 @@
 This Graphical User Interface was developed to allow for the analysis of [Paraver](https://tools.bsc.es/paraver) traces in the scope of the Cache-Aware Roofline Model (CARM) for floating-point operations. This GUI relies on CARM results obtained via the CARM Tool which can be found in its ([Github repositoy](https://github.com/champ-hub/carm-roofline)), for instructions on running the CARM Tool please consult the README and other documentation available in it's repository. For instruction on running Paraver and obtaining Paraver/Extrae traces please consult the Paraver/Extrae documentation.
 
 # Requirements
-- python (only tested with python 3.8.8)
-    - matplolib (only tested with 3.3.4)
+- python (only tested with python 3.12.3)
+    - matplolib
     - numpy
     - dash
     - dash-bootstrap-components
@@ -27,6 +27,8 @@ export PATH="$PATH:/path/to/Paraver/bin"
 ```
 
 After this step Paraver can be launched, and the option to launch CARM from a Paraver timeline should be available.
+
+Keep in mind the CARM GUI needs CARM results from the CARM Tool in order to plot Paraver timestamps, this repository includes some example CARM results sourced from the [MareNostrum 5](https://www.bsc.es/supportkc/docs/MareNostrum5/overview/) supercomputer in the carm_results folder. To add more CARM results simply add the output xxx_roofline.csv files from the CARM Tool to the carm_results folder.
 
 To use the CARM interface, a Paraver/Extrae trace is needed which was instrumented with Intel FP and memory counters such as:
 

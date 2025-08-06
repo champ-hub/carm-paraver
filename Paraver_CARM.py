@@ -3934,13 +3934,13 @@ def update_slider_marks(group_value, current_values, time_values, timestamps_gro
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
     if triggered_id == 'input-number' or current_values is None or triggered_id in ["lower-filter", "duration-filter", 'time-slider', "button-paraver-mask"]:
         
-        #if len(grouped_segments) < max_dots_auto:
-        #    initial_range = [0, max_index]
-        #else:
-        if max_index > 0:
-            initial_range = [0, min(max_index, 1)]
+        if len(grouped_segments) < max_dots_auto:
+            initial_range = [0, max_index]
         else:
-            initial_range = [0, 0]
+            if max_index > 0:
+                initial_range = [0, min(max_index, 1)]
+            else:
+                initial_range = [0, 0]
 
         filtered_marks = {
             initial_range[0]: marks[initial_range[0]],
