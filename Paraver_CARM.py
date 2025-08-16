@@ -10,12 +10,10 @@ import datetime
 import sys
 import re
 import logging
-from pathlib import Path
 
 #Third Party Libraries
-#Run: pip install dash dash-bootstrap-components plotly numpy pandas
-#To get all of the Libraries
-from copy import deepcopy
+#Run: pip install dash dash-bootstrap-components dash-daq numpy pandas plotly 
+#To get all of the Libraries in case requirements.txt method fails
 import pandas as pd
 import plotly.graph_objects as go
 import dash
@@ -1905,7 +1903,7 @@ def update_annotation_angles(input_angles, figure):
         if i < len(annotations):
             annotations[i]['textangle'] = angle
     
-    new_figure = deepcopy(figure)
+    new_figure = copy.deepcopy(figure)
     new_figure['layout']['annotations'] = annotations
 
     return new_figure
@@ -3308,7 +3306,7 @@ def analysis(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPI
                     figure = go.Figure(figure)
         elif (trigger_id == 'interval-component') and data_points>0:
             if not figure is None:
-                figure = deepcopy(figure)
+                figure = copy.deepcopy(figure)
                 figure = go.Figure(figure)
             if n_intervals == 0:
                 indexer = data_points - 1
@@ -3762,6 +3760,7 @@ def update_number(divide_clicks, multiply_clicks, time_values, lower_filter, dur
     ],
 )
 def update_slider_marks2(current_values, lower_filter, duration_filter, mask_button):
+    global mask_button_offset
     if mask_button_offset != -1:
         if (mask_button + mask_button_offset) % 2 == 1:
             use_paraver_mask = False
@@ -3788,7 +3787,9 @@ def update_slider_marks2(current_values, lower_filter, duration_filter, mask_but
     filtered_base = filtered_base.reset_index(drop=True)
     segments = filtered_base["Timestamp"].tolist()
     n_segments = len(segments)
-
+    if n_segments == 0:
+        safe_marks = {0: {'label': 'No data', 'style': {'margin-top': '0px'}}}
+        return safe_marks, 0, [0, 0]
     #Calculate the number of items per group
     grouped_segments = []
     group_value = 1
@@ -3871,7 +3872,7 @@ def update_slider_marks2(current_values, lower_filter, duration_filter, mask_but
 )
 def update_slider_marks(group_value, current_values, time_values, timestamps_grouper, lower_filter, duration_filter, mask_button):
     #Callback to update the timestamp slider marks
-    global max_dots_auto
+    global max_dots_auto, mask_button_offset
     start_index = time_values[0]
     end_index = time_values[1]
     
@@ -3905,6 +3906,10 @@ def update_slider_marks(group_value, current_values, time_values, timestamps_gro
     selected_segments = filtered_base.loc[start_index:end_index, "Timestamp"].tolist()
     n_segments = len(selected_segments)
 
+    if n_segments == 0:
+        safe_marks = {0: {'label': 'No data', 'style': {'margin-top': '0px'}}}
+        return safe_marks, 0, [0, 0]
+
     grouped_segments = []
 
     for i in range(0, n_segments, group_value):
@@ -3935,7 +3940,10 @@ def update_slider_marks(group_value, current_values, time_values, timestamps_gro
     if triggered_id == 'input-number' or current_values is None or triggered_id in ["lower-filter", "duration-filter", 'time-slider', "button-paraver-mask"]:
         
         if len(grouped_segments) < max_dots_auto:
-            initial_range = [0, max_index]
+            if max_index > 0:
+                initial_range = [0, max_index]
+            else:
+                initial_range = [0, 0]
         else:
             if max_index > 0:
                 initial_range = [0, min(max_index, 1)]
@@ -4039,4 +4047,4 @@ app.clientside_callback(
 if __name__ == '__main__':
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
-    app.run_server(debug=False)
+    app.run(debug=False)

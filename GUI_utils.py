@@ -1,16 +1,18 @@
 import csv
 import os
 import math
-import plotly.graph_objects as go
-import numpy as np
-import pandas as pd
 import shutil
 import sys
 import subprocess
 
+import plotly.graph_objects as go
+import numpy as np
+import pandas as pd
+import hashlib
+
 CONFIG_FILE = "./config/auto_config/config.txt"
 
-import hashlib
+
 
 intel_ISA_colors = {"avx512": "blue", "avx2": "green", "sse": "purple", "scalar": "black"}
 color_map = {

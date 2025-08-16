@@ -4,10 +4,10 @@ This Graphical User Interface was developed to allow for the analysis of [Parave
 
 # Requirements
 - python (only tested with python 3.12.3)
-    - matplolib
-    - numpy
     - dash
     - dash-bootstrap-components
+    - dash-daq
+    - numpy
     - pandas
     - plotly
 
@@ -18,15 +18,29 @@ This Graphical User Interface was developed to allow for the analysis of [Parave
 ## Setup
 The GUI is launched via the Paraver interface, the option to do so can be found by right clicking any Paraver timeline, and then expanding the "Run" dropdown were the CARM option can be selected to launch the Paraver windown that will configure and launch the CARM GUI.
 
-To have the CARM option available and fully working in Paraver, users must first add the path to the root directory of this repository, and the path to Paraver's bin directory to their PATH like so: 
+### Python Dependencies
+The CARM GUI requires some Python packages to be installed, they can be installed using the requirements.txt file:
+
+```
+pip install -r requirements.txt
+
+```
+In some cases you might need the flag --break-system-packages or a Python virtual environment (recommended) to install the packages (this is likely the case if you get the error: externally-managed-environment PEP 668).
+
+### Other Dependencies
+Add the path to the root directory of this repository, and the path to Paraver's bin directory to their PATH like so: 
 
 ```
 export PATH="$PATH:/path/to/repository/carm-paraver"
 export PATH="$PATH:/path/to/Paraver/bin"
 
 ```
+In case you want to keep these folders added to your PATH permanently you can run setup.sh like so:
+```
+./setup.sh /path/to/Paraver/bin"
 
-After this step Paraver can be launched, and the option to launch CARM from a Paraver timeline should be available.
+```
+After these steps Paraver can be launched, and the option to launch CARM from a Paraver timeline should be available.
 
 Keep in mind the CARM GUI needs CARM results from the CARM Tool in order to plot Paraver timestamps, this repository includes some example CARM results sourced from the [MareNostrum 5](https://www.bsc.es/supportkc/docs/MareNostrum5/overview/) supercomputer in the carm_results folder. To add more CARM results simply add the output xxx_roofline.csv files from the CARM Tool to the carm_results folder.
 
@@ -76,4 +90,4 @@ Sends a trace which can be viewed in Paraver, where each timestamp is identified
 The right sidebar controls the CARM GUI specific features, which include various filtering and coloring options as well as graphical annotations.
 
 ### Note
-The CARM GUI can also be launched from outside a Paraver timeline, for this click the "Run Application" option (Gear Icon) in the top bar of Paraver
+The CARM GUI can also be launched from outside a Paraver timeline, for this click the "Run Application" option (Gear Icon) in the top bar of Paraver.
