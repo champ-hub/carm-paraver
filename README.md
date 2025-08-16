@@ -23,7 +23,6 @@ The CARM GUI requires some Python packages to be installed, they can be installe
 
 ```
 pip install -r requirements.txt
-
 ```
 In some cases you might need the flag --break-system-packages or a Python virtual environment (recommended) to install the packages (this is likely the case if you get the error: externally-managed-environment PEP 668).
 
@@ -33,12 +32,10 @@ Add the path to the root directory of this repository, and the path to Paraver's
 ```
 export PATH="$PATH:/path/to/repository/carm-paraver"
 export PATH="$PATH:/path/to/Paraver/bin"
-
 ```
 In case you want to keep these folders added to your PATH permanently you can run setup.sh like so:
 ```
 ./setup.sh /path/to/Paraver/bin"
-
 ```
 After these steps Paraver can be launched, and the option to launch CARM from a Paraver timeline should be available.
 
