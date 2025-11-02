@@ -96,13 +96,30 @@ intel_performance_counters_mapping = {
         'Intel_Loads_Stores': 'MEM_INST_RETIRED:ALL'
 }
 
+memory_counters = {'Intel_Loads', 'Intel_Stores', 'Intel_Loads_Stores'}
+fp_counters = {key for key in intel_performance_counters_mapping if key.startswith('Intel_FP_')}
+
 intel_configs = [
     os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_Scalar_DP.cfg'),
     os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_SSE_DP.cfg'),
     os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_AVX2_DP.cfg'),
     os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_AVX512_DP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_Scalar_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_SSE_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_AVX2_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_FP_AVX512_SP.cfg'),
     os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_Loads.cfg'),
-    os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_Stores.cfg')
+    os.path.join(script_dir, 'paraver_carm_configs', 'Intel', 'Intel_Stores.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_Scalar_DP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_SSE_DP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_AVX2_DP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_AVX512_DP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_Scalar_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_SSE_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_AVX2_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_FP_AVX512_SP.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_Loads.cfg'),
+    os.path.join(script_dir, 'paraver_carm_configs', 'IntelV2', 'Intel_Stores.cfg'),
 ]
 
 amd_performance_counters = {
@@ -205,7 +222,7 @@ if mask_csv_path != "":
 
 if color_csv_path != "":
     if not color_csv_path.endswith('.legend.csv'):
-        print(f"Error: Expected a legend file ending with '.legend.csv', got: {color_csv_path}")
+        print(f"ERROR: Expected a legend file ending with '.legend.csv', got: {color_csv_path}")
         sys.exit(1)
 
 if mask_csv_path != "" and mask_csv_path.endswith('.csv'):
@@ -270,7 +287,7 @@ else:
 scaling_unit = scaling_factors.get(time_unit.lower(), 1)
 
 if not os.path.exists(path):
-    print(f"Error: The path '{path}' does not exist")
+    print(f"ERROR: The path '{path}' does not exist")
     sys.exit(1)
 
 ok = ut.find_and_run("paramedir")
@@ -284,7 +301,8 @@ if path.endswith('.prv') or path.endswith('.gz'):
         "paramedir",
         path,
         *intel_configs
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+    check=True)
     print("Paramedir execution finished, calculating CARM metrics.",flush=True)
 
 #Get CARM results
@@ -298,7 +316,7 @@ else:
 machine_names = [file.replace('_roofline.csv', '') for file in csv_files]
 
 merged_df = None
-missing_files = []
+missing_files = set()
 found_files = []
 sp_counters_available = False
 dp_counters_available = False
@@ -314,14 +332,46 @@ for counter_name, value in intel_performance_counters.items():
         else:
             #Merge with the existing DataFrame on ThreadID, Timestamp, and Duration
             merged_df = pd.merge(merged_df, df, on=['ThreadID', 'Timestamp', 'Duration'], how='outer')
+        try:
+            os.remove(filename)
+        except OSError as e:
+            print(f"Warning: Could not delete {filename} ({e}), old data might be used", flush=True)
+    
     else:
-        missing_files.append(filename[:-4])
+        missing_files.add(filename[:-4])
         #If the file is missing, create a DataFrame with zeros for this counter
         if merged_df is None:
             merged_df = pd.DataFrame(columns=['ThreadID', 'Timestamp', 'Duration', counter_name])
             merged_df[counter_name] = 0
         else:
             merged_df[counter_name] = 0
+
+no_mem = False
+
+# Check if all memory counters are missing
+if memory_counters <= missing_files:
+    print(
+        "ERROR: No memory counters found. Please add at least one of the following Intel memory counters "
+        "to your XML file (separate Loads and Stores recommended):",
+        flush=True,
+    )
+    for key in memory_counters:
+        print(f"{key.replace('Intel_', '').replace('_', ' ')} -> {intel_performance_counters_mapping[key]}", flush=True)
+    no_mem = True
+
+# Check if all FP (floating point) counters are missing
+if fp_counters <= missing_files:
+    print(
+        "ERROR: No floating-point counters found. Please add at least one of the following Intel FP counters "
+        "to your XML file:",
+        flush=True,
+    )
+    for key in sorted(fp_counters):
+        print(f"{key.replace('_', ' ')} -> {intel_performance_counters_mapping[key]}", flush=True)
+    sys.exit(1)
+
+if no_mem:
+    sys.exit(1)
     
 if "Intel_Loads" not in missing_files and "Intel_Stores" not in missing_files and "Intel_Loads_Stores" in missing_files:
     missing_files.remove("Intel_Loads_Stores")
@@ -333,7 +383,7 @@ if any("DP" in s for s in found_files):
 
 
 missing_msg = (
-    "\nAdd these counters to your XML file to monitor all possible events:\n\n  "
+    "\nAdd these counters to your XML file to monitor all possible events, \nthese counters should remain in a single counter set:\n\n  "
     + "\n  ".join(
         [
             f"{f.replace('_', ' ')} -> {intel_performance_counters_mapping.get(f, 'No mapping found')}"
@@ -637,13 +687,13 @@ sidebar = dbc.Offcanvas(
                     dbc.Col([
                         html.P("Toggle Total:", 
                         className="mb-1", 
-                        style={'color': 'black', 'margin-right': '10px', 'display': 'inline-block'}),
+                        style={'color': 'black', 'margin-right': '10px', 'display': 'none'}),
                         dbc.Checklist(
                             id='total-checklist',
                             options=[{'label': '', 'value': 'Total'}],
                             inline=True,
                             className="mb-1",
-                            style={'color': 'black', 'display': 'inline-block'}
+                            style={'color': 'black', 'display': 'none'}
                         ),       
                     ], width=6),
                 ]),
@@ -697,9 +747,9 @@ sidebar = dbc.Offcanvas(
                 dbc.RadioItems(
                     id='color-radio',
                     options=[
-                        {'label': ' Youngest', 'value': 'Youngest'},
-                        {'label': ' Oldest', 'value': 'Oldest'},
-                        {'label': ' Duration', 'value': 'Duration'},
+                        {'label': ' Age', 'value': 'Youngest'},
+                        #{'label': ' Oldest', 'value': 'Oldest'},
+                        #{'label': ' Duration', 'value': 'Duration'},
                         {'label': ' Thread ID', 'value': 'Thread ID'},
                         {'label': ' Precision', 'value': 'Precision'},
                         {'label': ' LD/ST Percentage', 'value': 'LD/ST Percentage'},
@@ -944,7 +994,7 @@ app.layout = dbc.Container([
                                     html.P(f"Execution Timestamps To Plot ({time_unit})", style={
                                         'textAlign': 'center',
                                         'fontWeight': 'bold',
-                                        'margin': '0 210px',
+                                        'margin': '0 200px',
                                         'margin-top': '-6px'
                                     }),
                                     html.P("Grouping", style={
@@ -955,7 +1005,8 @@ app.layout = dbc.Container([
                                     html.P("Average", style={
                                         'textAlign': 'center',
                                         'fontWeight': 'bold',
-                                        'margin': '0 5px'
+                                        'margin': '0 5px',
+                                        'display': 'none'
                                     }),
                                 ], style={
                                     'display': 'flex',
@@ -999,7 +1050,7 @@ app.layout = dbc.Container([
                                         dbc.Checkbox(
                                             id='average-checkbox',
                                             label='',
-                                            style={'margin-top': '-15px', 'margin-left': '40px'}
+                                            style={'margin-top': '-15px', 'margin-left': '40px', 'display': 'none'}
                                         ),
                                         ], style={
                                         'display': 'flex',
@@ -1292,7 +1343,7 @@ def update_slider_from_csv(n_intervals, button_clicks, lower_filter, duration_fi
 
                 except Exception as e:
                     if no_sync:
-                        print("Error finding indices in main_df:", e, flush=True)
+                        print("ERROR finding indices in main_df:", e, flush=True)
                         print('Check if the "Cut values lower than" option is not too high for the current region of interest', flush=True)
                         no_sync = False
                     raise dash.exceptions.PreventUpdate
