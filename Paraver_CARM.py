@@ -587,7 +587,26 @@ columns_to_check = [
     "Intel_FP_AVX512_DP",
 ]
 ordered_df = ordered_df.fillna(0)
+
+# Report progress during processing of rows
+total_rows = len(ordered_df)
+rows_chars = len(str(total_rows))
+step = max(1, total_rows // 20) if total_rows > 0 else 1
+processed = 0
+print(f"Processing {total_rows} rows for CARM metrics...")  # Initial message
 for index, row in ordered_df.iterrows():
+    processed += 1
+    if processed % step == 0 or processed == total_rows:
+        # print a progress bar
+        progress = processed / total_rows
+        bar_width = 20  # Total width of the progress bar
+        segments = int(bar_width * progress)
+        print(
+            f"[{'=' * segments}{'-' * (bar_width - segments)}] {progress * 100:.0f}%",
+            end="\r",
+            flush=True,
+        )
+
     duration = row["Duration"] * scaling_unit
     timestamp = row["Timestamp"]
     if all(pd.isnull(row[col]) or row[col] == 0 for col in columns_to_check):
@@ -739,6 +758,10 @@ for index, row in ordered_df.iterrows():
     intel_statistics2["Intel_Load"].append(row["Intel_Loads"])
     intel_statistics2["Intel_Store"].append(row["Intel_Stores"])
     intel_statistics2["Intel_Load_Percent"].append(load_percentage)
+
+# finish progress line
+if total_rows > 0:
+    print()
 
 base_statistics_df = pd.DataFrame(base_statistics)
 full_base_statistics_df = pd.DataFrame(full_base_statistics)
