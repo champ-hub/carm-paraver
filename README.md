@@ -34,8 +34,8 @@ export PATH="$PATH:/path/to/repository/carm-paraver"
 export PATH="$PATH:/path/to/Paraver/bin"
 ```
 In case you want to keep these folders added to your PATH permanently you can run setup.sh like so:
-```
-./setup.sh /path/to/Paraver/bin"
+```sh
+./setup.sh /path/to/Paraver/bin # relative or absolute paths work
 ```
 After these steps Paraver can be launched, and the option to launch CARM from a Paraver timeline should be available.
 
@@ -60,6 +60,15 @@ To use the CARM interface, a Paraver/Extrae trace is needed which was instrument
 
 At least one FP and one memory counter (separate load and store counters are recommended for a more detailed analysis) must be available in the trace to be analyzed, otherwise the CARM analysis is not possible. It is also recommended to keep all counters in a single counter set (when obtaining the trace via Extrae), this usually allows for all FP counters of a given precision (DP or SP) and the load and store counters. Precisions can also be mixed but the amount of counters used must fit in a single counter set.
 
+## Steps
+
+After performing the setup above, you can:
+
+1. Load a Paraver trace with the required counters, and zoom into a section of interest.
+    - **Processing time is heavily dependent on the time range selected. It is recommended the analysis be focused on a ~50ms section to avoid a long wait.**
+2. Right click the timeline and select the option to launch the CARM GUI.
+3. Configure the options within the Paraver interface to your liking, and click "Run".
+4. Click the link printed in the Paraver console to open the GUI in your browser.
 
 ## Features
 
@@ -88,6 +97,11 @@ Same as above, but labels the timestamps based on the percentage of single to do
 
 ### Right Sidebar
 The right sidebar controls the CARM GUI specific features, which include various filtering and coloring options as well as graphical annotations.
+
+Useful options include:
+- **Filter points** by vector ISA or precision
+- **Color points** based on thread ID, precision, vector ISA or load/store ratio
+    - Note that this requires the left sidebar option to be set to "Use CARM GUI Colors".
 
 ### Note
 The CARM GUI can also be launched from outside a Paraver timeline, for this click the "Run Application" option (Gear Icon) in the top bar of Paraver.

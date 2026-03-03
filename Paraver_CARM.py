@@ -368,9 +368,7 @@ if path.endswith(".prv") or path.endswith(".gz"):
         stderr=subprocess.DEVNULL,
         check=True,
     )
-    print(
-        "Paramedir execution finished, calculating CARM metrics.", flush=True
-    )  # TODO: add progress bar
+    print("Paramedir execution finished, calculating CARM metrics.", flush=True)
 
 # Get CARM results
 if os.path.exists(carm_pathway):
@@ -634,9 +632,17 @@ total_rows = len(ordered_df)
 rows_chars = len(str(total_rows))
 step = max(1, total_rows // 20) if total_rows > 0 else 1
 processed = 0
-print(f"Processing {total_rows} rows for CARM metrics...")  # Initial message
+if total_rows > 50_000:
+    print(
+        f"WARNING: Processing a large number of rows ({total_rows}), this might take a while. Consider zooming "
+        f"into a smaller time range (~50ms) in Paraver before launching CARM for a faster analysis.",
+        flush=True,
+    )
+else:
+    print(
+        f"Processing {total_rows} rows for CARM metrics...", flush=True
+    )  # Initial message
 for index, row in ordered_df.iterrows():
-    processed += 1
     if processed % step == 0 or processed == total_rows:
         # print a progress bar
         progress = processed / total_rows
@@ -647,6 +653,7 @@ for index, row in ordered_df.iterrows():
             end="\r",
             flush=True,
         )
+    processed += 1
 
     duration = row["Duration"] * scaling_unit
     timestamp = row["Timestamp"]
