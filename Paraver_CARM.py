@@ -9,6 +9,8 @@ import subprocess
 import sys
 import re
 import logging
+import socket
+import errno
 
 # Third Party Libraries
 # Run: pip install dash dash-bootstrap-components dash-daq numpy pandas plotly
@@ -25,6 +27,45 @@ from dash import Input, Output, State, html, ALL, dcc, callback_context
 import GUI_utils as ut
 
 VERSION = "1.0.0"
+
+# determine a usable port before performing expensive setup
+base_port = int(os.environ.get("CARM_PORT", "8050"))
+original_port = base_port
+max_attempts = 5
+SELECTED_PORT = None
+for attempt in range(max_attempts):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        sock.bind(("0.0.0.0", base_port))
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            print(
+                f"WARNING: port {base_port} already in use; trying next port",
+                file=sys.stderr,
+                flush=True,
+            )
+            sock.close()
+            base_port += 1
+            continue
+        else:
+            sock.close()
+            raise
+    sock.close()
+    SELECTED_PORT = base_port
+    break
+
+if SELECTED_PORT is None:
+    print(
+        "ERROR: could not find an open port after several attempts; exiting.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+elif SELECTED_PORT != original_port:
+    print(
+        f"Using port {SELECTED_PORT}. There is likely an orphaned instance of carm-paraver running. Kill any "
+        f"'python Paraver_CARM.py' processes to use the default port {original_port}."
+    )
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 carm_pathway = os.path.join(script_dir, "carm_results", "roofline")
@@ -2102,6 +2143,10 @@ def update_slider_from_csv(
     prevent_initial_call=True,
 )
 def generate_csv(n_clicks, lines):
+    if lines is None:
+        print("Graph lines data is None, cannot generate roof labels CSV.", flush=True)
+        return
+
     global full_base_statistics_df, path, time_unit
     ctx = callback_context
     if not ctx.triggered:
@@ -5511,4 +5556,11 @@ app.clientside_callback(
 if __name__ == "__main__":
     log = logging.getLogger("werkzeug")
     log.setLevel(logging.ERROR)
-    app.run(debug=False)
+
+    # Force the host to a loopback address instead of letting Dash/Flask resolve the local hostname, which seems to
+    # cause issues in some distributions.
+    host = "127.0.0.1"
+    print(f"Starting Dash app on {host}:{SELECTED_PORT}")
+
+    # use run_server for Dash apps (wrapper around Flask.run)
+    app.run_server(debug=False, port=SELECTED_PORT, host=host)
