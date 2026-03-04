@@ -1018,6 +1018,27 @@ sidebar = dbc.Offcanvas(
                             ],
                             style={"display": "flex", "alignItems": "center"},
                         ),
+                        # normalize roofs per-thread switch
+                        html.Div(
+                            [
+                                dbc.Label(
+                                    "Normalize Roofs by Threads",
+                                    html_for="normalize-switch",
+                                    style={"marginRight": "70px"},
+                                ),
+                                dbc.Switch(id="normalize-switch", label="", value=True),
+                                dbc.Tooltip(
+                                    "When enabled, the roofline performance will be normalized by the number of "
+                                    "threads, showing the performance per thread. Given timestamp performance is "
+                                    "also at the level of a thread, enabling this allows to better compare the "
+                                    "points to the roofs. Disabling this will give you a better idea of the "
+                                    "overall performance of the system.",
+                                    target="normalize-switch",
+                                    placement="right",
+                                ),
+                            ],
+                            style={"display": "flex", "alignItems": "center"},
+                        ),
                     ]
                 ),
                 style={"backgroundColor": "white"},
@@ -4057,6 +4078,7 @@ def chained_callback_Date2(
         Input("total-checklist", "value"),
         Input("exponent-switch", "value"),
         Input("line-legend-switch", "value"),
+        Input("normalize-switch", "value"),
         Input("lower-filter", "value"),
         Input("duration-filter", "value"),
         Input("line-size", "value"),
@@ -4106,6 +4128,7 @@ def analysis(
     plot_total,
     exponant,
     line_legend,
+    normalize,
     lower_filter,
     duration_filter,
     line_size,
@@ -4819,7 +4842,7 @@ def analysis(
                 "font_size": tooltip_size,
             },
             title={
-                "text": "Cache Aware Roofline Model",
+                "text": "Cache Aware Roofline Model" + " (per thread)" if normalize else "",
                 "y": 0.95,
                 "x": 0.5,
                 "xanchor": "center",
@@ -4841,7 +4864,7 @@ def analysis(
             },
             yaxis={
                 "title": {
-                    "text": "Performance (GFLOP/s)",
+                    "text": f"Performance (GFLOP/s{' per thread' if normalize else ''})",
                     "font": {"family": "Arial", "size": axis_size, "color": "black"},
                 },
                 "type": "log",
@@ -4873,6 +4896,21 @@ def analysis(
             ["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]
         ].tolist()
         ISA = filtered_df1.iloc[-1][["ISA"]].tolist()
+        # scale down bandwidth and compute ceilings if normalization requested
+        if normalize:
+            try:
+                threads1 = float(filtered_df1.iloc[-1]["Threads"])
+            except Exception:
+                threads1 = 1.0
+            if threads1 > 0:
+                # indices 0-3: L1,L2,L3,DRAM bandwidths
+                # indices 4-5: FP and FP_FMA ceilings
+                for i in range(6):
+                    try:
+                        values1[i] = values1[i] / threads1
+                    except Exception:
+                        # ignore non-numeric labels (e.g. FPInst at index 6)
+                        pass
         lines = ut.calculate_roofline(values1, smallest_ai / 5)
         if (
             lines != lines_origin
@@ -4918,6 +4956,18 @@ def analysis(
             ["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]
         ].tolist()
         ISA.append(filtered_df2.iloc[-1][["ISA"]].tolist()[0])
+        # apply normalization if requested
+        if normalize:
+            try:
+                threads2 = float(filtered_df2.iloc[-1]["Threads"])
+            except Exception:
+                threads2 = 1.0
+            if threads2 > 0:
+                for i in range(6):
+                    try:
+                        values2[i] = values2[i] / threads2
+                    except Exception:
+                        pass
         lines2 = ut.calculate_roofline(values2, smallest_ai / 5)
 
         if lines2 != lines_origin2 and trigger_id != "interval-component":
