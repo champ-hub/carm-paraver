@@ -1,14 +1,14 @@
 import csv
-import os
+import hashlib
 import math
+import os
 import shutil
-import sys
 import subprocess
+import sys
 
-import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
-import hashlib
+import plotly.graph_objects as go
 
 CONFIG_FILE = "./config/auto_config/config.txt"
 
@@ -86,9 +86,7 @@ def is_valid_paraver_value(val):
         return True
 
 
-def find_nearest_positive(
-    df, index, lower_filter, duration_filter, use_paraver_mask, min_bound=0
-):
+def find_nearest_positive(df, index, lower_filter, duration_filter, use_paraver_mask, min_bound=0):
     max_index = len(df) - 1
 
     def row_is_valid(i):
@@ -127,7 +125,7 @@ def find_nearest_positive(
 
 def read_library_path(tag):
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as file:
+        with open(CONFIG_FILE) as file:
             for line in file:
                 if line.strip() == "":
                     continue
@@ -280,9 +278,7 @@ def interpolate_color(start_color, end_color, factor):
     return f"rgb({r},{g},{b})"
 
 
-def construct_query(
-    ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date
-):
+def construct_query(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date):
     query_parts = []
     if ISA:
         query_parts.append(f"ISA == '{ISA}'")
@@ -436,7 +432,7 @@ def plot_roofline(values, dots, name_suffix, ISA, line_legend, line_size):
         color_inst = "red"
     linestyles = ["solid", "solid", "dash", "dot"]
 
-    for cache_level, color, linestyle in zip(cache_levels, colors, linestyles):
+    for cache_level, color, linestyle in zip(cache_levels, colors, linestyles, strict=True):
         cache_dots = dots.get(cache_level)
         if cache_dots:
             aidots = [
@@ -459,7 +455,7 @@ def plot_roofline(values, dots, name_suffix, ISA, line_legend, line_size):
                     f"FP FMA {ISA.upper()} Peak: {values[5]} GFLOP/s",
                 ],
                 hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
-                line=dict(color=color, dash=linestyle, width=line_size),
+                line={"color": color, "dash": linestyle, "width": line_size},
                 name=f"{cache_level} {ISA.upper()}",
                 showlegend=line_legend,
             )
@@ -477,7 +473,7 @@ def plot_roofline(values, dots, name_suffix, ISA, line_legend, line_size):
             f"FP {ISA.upper()} {values[6].upper()} Peak: {values[4]} GFLOP/s",
         ],
         hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
-        line=dict(color=color_inst, dash="dashdot", width=line_size),
+        line={"color": color_inst, "dash": "dashdot", "width": line_size},
         name=f"{values[6].upper()} {ISA.upper()}",
         showlegend=line_legend,
     )
@@ -519,12 +515,8 @@ def draw_annotation(
         x1_pixel = ((log_x1 - log_xmin) / (log_xmax - log_xmin)) * graph_width
         x2_pixel = ((log_x2 - log_xmin) / (log_xmax - log_xmin)) * graph_width
 
-        y1_pixel = (
-            graph_height - ((log_y1 - log_ymin) / (log_ymax - log_ymin)) * graph_height
-        )
-        y2_pixel = (
-            graph_height - ((log_y2 - log_ymin) / (log_ymax - log_ymin)) * graph_height
-        )
+        y1_pixel = graph_height - ((log_y1 - log_ymin) / (log_ymax - log_ymin)) * graph_height
+        y2_pixel = graph_height - ((log_y2 - log_ymin) / (log_ymax - log_ymin)) * graph_height
 
         pixel_slope = (y2_pixel - y1_pixel) / (x2_pixel - x1_pixel)
 
@@ -554,10 +546,10 @@ def draw_annotation(
             y=math.log10(lines[cache_level]["mid"][1] * factor),
             text=f"{cache_level} {ISA} Bandwidth: {values[cache_levels.index(cache_level)]:.3f} GB/s",
             showarrow=False,
-            font=dict(
-                color=colors[0],
-                size=12,
-            ),
+            font={
+                "color": colors[0],
+                "size": 12,
+            },
             align="center",
             bgcolor="white",
             bordercolor=colors[0],
@@ -574,10 +566,10 @@ def draw_annotation(
             y=math.log10(mid_gflops),
             text=f"FP FMA {ISA} Peak: {values[5]:.3f} GFLOP/s",
             showarrow=False,
-            font=dict(
-                color=colors[0],
-                size=12,
-            ),
+            font={
+                "color": colors[0],
+                "size": 12,
+            },
             align="center",
             bgcolor="white",
             bordercolor=colors[0],
@@ -594,10 +586,10 @@ def draw_annotation(
             y=math.log10(mid_gflops),
             text=f"FP {ISA} Peak: {values[4]:.3f} GFLOP/s",
             showarrow=False,
-            font=dict(
-                color=colors[0],
-                size=12,
-            ),
+            font={
+                "color": colors[0],
+                "size": 12,
+            },
             align="center",
             bgcolor="white",
             bordercolor=colors[0],
@@ -609,9 +601,7 @@ def draw_annotation(
     return annotation
 
 
-def build_total_tooltip_text(
-    name_app, threads_app, totals, total_FP_inst, total_mem_inst
-):
+def build_total_tooltip_text(name_app, threads_app, totals, total_FP_inst, total_mem_inst):
     lines = [f"{name_app} Total</b><br>Extra Details</b><br>   Threads: {threads_app}"]
 
     metrics = {
@@ -675,9 +665,7 @@ def build_timestamp_tooltip_text(
         ("Stores", 100 - load),
     ]
     tooltip_lines = [f"Timestamp: {timestamp_label}"]
-    tooltip_lines.append(
-        f"</b><br>   Thread: {thread_ID}</b><br>   Duration(us): {duration}"
-    )
+    tooltip_lines.append(f"</b><br>   Thread: {thread_ID}</b><br>   Duration(us): {duration}")
     tooltip_lines.append("</b><br><b>Extra Details</b>")
 
     for label, value in metrics:
@@ -741,18 +729,16 @@ def blend_rgb(weights, color_dict, return_rgb):
         g += cg * w
         b += cb * w
 
-    r = int(round(r))
-    g = int(round(g))
-    b = int(round(b))
+    r = round(r)
+    g = round(g)
+    b = round(b)
     if return_rgb:
         return r, g, b
     else:
         return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def blend_colors(
-    scalar, sse, avx2, avx512, dp, load, thread_ID, color_radio, return_rgb
-):
+def blend_colors(scalar, sse, avx2, avx512, dp, load, thread_ID, color_radio, return_rgb):
     if color_radio == "ISA":
         weights = {"scalar": scalar, "sse": sse, "avx2": avx2, "avx512": avx512}
         active = {k: v for k, v in weights.items() if v > 0}

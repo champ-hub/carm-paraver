@@ -831,23 +831,6 @@ for row in counter_data_df.itertuples(index=False):
     intel_statistics2["Intel_Store"].append(row.Intel_Stores)
     intel_statistics2["Intel_Load_Percent"].append(load_percentage)
 
-# Get memory usage of all objects > 1 MB, sorted by size
-objects = []
-for name, obj in list(globals().items()):
-    size = sys.getsizeof(obj)
-    if size > 1_000_000:  # 1 MB
-        objects.append((name, size))
-
-# Sort by size (biggest first)
-objects.sort(key=lambda x: x[1], reverse=True)
-
-# Print results
-print("\nObjects > 1 MB (sorted by size):")
-print("-" * 50)
-for name, size in objects:
-    size_mb = size / (1024 * 1024)
-    print(f"{name:30s}: {size_mb:8.2f} MB")
-
 del counter_data_df
 
 # finish progress line
