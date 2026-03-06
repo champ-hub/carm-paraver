@@ -552,7 +552,7 @@ def draw_annotation(
         annotation = go.layout.Annotation(
             x=math.log10(lines[cache_level]["mid"][0] * factor),
             y=math.log10(lines[cache_level]["mid"][1] * factor),
-            text=f"{cache_level} {ISA} Bandwidth: {values[cache_levels.index(cache_level)]} GB/s",
+            text=f"{cache_level} {ISA} Bandwidth: {values[cache_levels.index(cache_level)]:.3f} GB/s",
             showarrow=False,
             font=dict(
                 color=colors[0],
@@ -572,7 +572,7 @@ def draw_annotation(
         annotation = go.layout.Annotation(
             x=math.log10(mid_ai),
             y=math.log10(mid_gflops),
-            text=f"FP FMA {ISA} Peak: {values[5]} GFLOP/s",
+            text=f"FP FMA {ISA} Peak: {values[5]:.3f} GFLOP/s",
             showarrow=False,
             font=dict(
                 color=colors[0],
@@ -592,7 +592,7 @@ def draw_annotation(
         annotation = go.layout.Annotation(
             x=math.log10(mid_ai),
             y=math.log10(mid_gflops),
-            text=f"FP {ISA} Peak: {values[4]} GFLOP/s",
+            text=f"FP {ISA} Peak: {values[4]:.3f} GFLOP/s",
             showarrow=False,
             font=dict(
                 color=colors[0],
