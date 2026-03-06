@@ -1,0 +1,43 @@
+[project]
+name = "carm-paraver"
+version = "2.0.0-dev"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "CARM Contributors"}
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start with a focused but helpful rule set; expand later as refactoring stabilizes.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # import sorting (isort)
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "C4",  # flake8-comprehensions
+    "RUF", # ruff-specific rules
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "E203",  # black compatibility for slices
+    "E266",  # allow double-line comments when needed
+    "E501",  # defer to formatter for line length
+]
+fixable = ["ALL"]
+
+[tool.ruff.lint.isort]
+# Configure import sorting to match common Python conventions
+known-first-party = ["architecture", "benchmark", "exec_interface", "arguments"]
+force-single-line = false  # Allow grouped imports for readability
+combine-as-imports = true  # Combine "as" imports on same line
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"

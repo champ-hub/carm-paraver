@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
 
-import os
-import datetime
-import math
-import copy
 import argparse
+import copy
+import datetime
+import errno
+import logging
+import math
+import os
+import re
+import socket
 import subprocess
 import sys
-import re
-import logging
-import socket
-import errno
+import time
+
+import dash
+import dash_bootstrap_components as dbc
+import dash_daq as daq
 
 # Third Party Libraries
 # Run: pip install dash dash-bootstrap-components dash-daq numpy pandas plotly
 # To get all of the Libraries in case requirements.txt method fails
 import pandas as pd
-from pandas import DataFrame
 import plotly.graph_objects as go
-import dash
-import dash_bootstrap_components as dbc
-import dash_daq as daq
+from dash import ALL, Input, Output, State, callback_context, dcc, html
 from dash.exceptions import PreventUpdate
-from dash import Input, Output, State, html, ALL, dcc, callback_context
+from pandas import DataFrame
 
 # Local Python Scripts
 import GUI_utils as ut
@@ -34,7 +36,7 @@ base_port = int(os.environ.get("CARM_PORT", "8050"))
 original_port = base_port
 max_attempts = 5
 SELECTED_PORT = None
-for attempt in range(max_attempts):
+for _attempt in range(max_attempts):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
@@ -138,9 +140,7 @@ intel_performance_counters_mapping = {
 }
 
 memory_counters = {"Intel_Loads", "Intel_Stores", "Intel_Loads_Stores"}
-fp_counters = {
-    key for key in intel_performance_counters_mapping if key.startswith("Intel_FP_")
-}
+fp_counters = {key for key in intel_performance_counters_mapping if key.startswith("Intel_FP_")}
 
 intel_configs = [
     os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_Scalar_DP.cfg"),
@@ -153,22 +153,14 @@ intel_configs = [
     os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_AVX512_SP.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_Loads.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_Stores.cfg"),
-    os.path.join(
-        script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_Scalar_DP.cfg"
-    ),
+    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_Scalar_DP.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_SSE_DP.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX2_DP.cfg"),
-    os.path.join(
-        script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX512_DP.cfg"
-    ),
-    os.path.join(
-        script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_Scalar_SP.cfg"
-    ),
+    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX512_DP.cfg"),
+    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_Scalar_SP.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_SSE_SP.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX2_SP.cfg"),
-    os.path.join(
-        script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX512_SP.cfg"
-    ),
+    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX512_SP.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_Loads.cfg"),
     os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_Stores.cfg"),
 ]
@@ -252,9 +244,7 @@ parser.add_argument(
     help="Use color CSV (.legend.csv) corresponding to the mask CSV",
 )
 parser.add_argument("--mask_csv", action="store_true", help="Use mask CSV")
-parser.add_argument(
-    "-ac", action="store_true", help="Optional flag for accumulate values mode"
-)
+parser.add_argument("-ac", action="store_true", help="Optional flag for accumulate values mode")
 parser.add_argument("--csv", type=str, required=True, help="Path to the mask CSV")
 parser.add_argument("trace_path", type=str, help="Path to the .prv file")
 
@@ -279,9 +269,7 @@ if mask_csv_path != "":
 
 if color_csv_path != "":
     if not color_csv_path.endswith(".legend.csv"):
-        print(
-            f"ERROR: Expected a legend file ending with '.legend.csv', got: {color_csv_path}"
-        )
+        print(f"ERROR: Expected a legend file ending with '.legend.csv', got: {color_csv_path}")
         sys.exit(1)
 
 if mask_csv_path != "" and mask_csv_path.endswith(".csv"):
@@ -301,7 +289,7 @@ if mask_csv_path != "" and mask_csv_path.endswith(".csv"):
 
     legend_filename = os.path.basename(color_csv_path)
 
-    with open(mask_csv_path, "r") as f:
+    with open(mask_csv_path) as f:
         first_line = f.readline().strip()
 
     parts = first_line.split(":")
@@ -367,23 +355,17 @@ def _write_temp_cfgs_with_timeunit(cfg_paths, time_unit_value):
 
     Returns list of written file paths (in cwd). If a source file is missing it is skipped.
     """
-    unit = (
-        time_unit_value
-        if time_unit_value and time_unit_value != "Unknown"
-        else "Microseconds"
-    )
+    unit = time_unit_value if time_unit_value and time_unit_value != "Unknown" else "Microseconds"
     written = []
     for src in cfg_paths:
         try:
-            with open(src, "r") as fh:
+            with open(src) as fh:
                 content = fh.read()
         except Exception:
             continue
 
         if re.search(r"(?m)^window_units\s+\S+", content):
-            new_content = re.sub(
-                r"(?m)^window_units\s+\S+", f"window_units {unit}", content
-            )
+            new_content = re.sub(r"(?m)^window_units\s+\S+", f"window_units {unit}", content)
         else:
             new_content = content + f"\nwindow_units {unit}\n"
 
@@ -400,7 +382,7 @@ def _write_temp_cfgs_with_timeunit(cfg_paths, time_unit_value):
 
 
 if path.endswith(".prv") or path.endswith(".gz"):
-    print(f"Executing Paramedir to parse the trace in {path}", flush=True)
+    print(f"Running Paramedir to parse the trace in {path}", flush=True)
     temp_cfgs = _write_temp_cfgs_with_timeunit(intel_configs, time_unit)
     try:
         subprocess.run(
@@ -424,9 +406,7 @@ if path.endswith(".prv") or path.endswith(".gz"):
 if os.path.exists(carm_pathway):
     csv_files = [f for f in os.listdir(carm_pathway) if f.endswith("_roofline.csv")]
 else:
-    print(
-        "ERROR: No CARM results found. Please add them to the ./carm-results/roofline folder."
-    )
+    print("ERROR: No CARM results found. Please add them to the ./carm-results/roofline folder.")
     sys.exit(1)
 
 # Extract machine names from filenames
@@ -439,7 +419,7 @@ sp_counters_available = False
 dp_counters_available = False
 
 # Loop through each counter
-for counter_name, value in intel_performance_counters.items():
+for counter_name in intel_performance_counters.keys():
     filename = f"{counter_name}.csv"
     if os.path.exists(filename):
         found_files.append(filename[:-4])
@@ -472,9 +452,7 @@ for counter_name, value in intel_performance_counters.items():
         missing_files.add(filename[:-4])
         # If the file is missing, create a DataFrame with zeros for this counter
         if counter_data_df is None:
-            counter_data_df = pd.DataFrame(
-                columns=["ThreadID", "Timestamp", "Duration", counter_name]
-            )
+            counter_data_df = pd.DataFrame(columns=["ThreadID", "Timestamp", "Duration", counter_name])
             counter_data_df[counter_name] = 0
         else:
             counter_data_df[counter_name] = 0
@@ -514,11 +492,7 @@ if fp_counters <= missing_files:
 if no_mem:
     sys.exit(1)
 
-if (
-    "Intel_Loads" not in missing_files
-    and "Intel_Stores" not in missing_files
-    and "Intel_Loads_Stores" in missing_files
-):
+if "Intel_Loads" not in missing_files and "Intel_Stores" not in missing_files and "Intel_Loads_Stores" in missing_files:
     missing_files.remove("Intel_Loads_Stores")
 
 if any("SP" in s for s in found_files):
@@ -546,9 +520,7 @@ total_time = (biggest_timestamp - counter_data_df["Timestamp"].min()) * scaling_
 
 total_threads = counter_data_df["ThreadID"].nunique()
 unique_threadIDs = counter_data_df["ThreadID"].unique().tolist()
-unique_threadIDs_checkbox = [
-    {"label": thread_id, "value": thread_id} for thread_id in unique_threadIDs
-]
+unique_threadIDs_checkbox = [{"label": thread_id, "value": thread_id} for thread_id in unique_threadIDs]
 
 filename_with_ext = os.path.basename(path)
 appname = os.path.splitext(filename_with_ext)[0]
@@ -577,8 +549,7 @@ bytes_modifier = (
     + 8 * (totals["Intel_FP_Scalar_DP"] / total_FP_inst)
     + 16 * ((totals["Intel_FP_SSE_SP"] + totals["Intel_FP_SSE_DP"]) / total_FP_inst)
     + 32 * ((totals["Intel_FP_AVX2_SP"] + totals["Intel_FP_AVX2_DP"]) / total_FP_inst)
-    + 64
-    * ((totals["Intel_FP_AVX512_SP"] + totals["Intel_FP_AVX512_DP"]) / total_FP_inst)
+    + 64 * ((totals["Intel_FP_AVX512_SP"] + totals["Intel_FP_AVX512_DP"]) / total_FP_inst)
 )
 # Calculate totals for the trace
 total_ai = total_FP_ops / (total_mem_inst * bytes_modifier)
@@ -586,15 +557,13 @@ total_GFLOPS = total_FP_ops / (total_time * 1e3)
 
 if color_csv_path != "":
     legend = []
-    with open(color_csv_path, "r") as f:
+    with open(color_csv_path) as f:
         for line in f:
             stripped = line.strip()
             if not stripped:
                 continue
 
-            match = re.match(
-                r'^([\d\.]+)(?:-([\d\.]+))?\s+"([^"]+)"\s+(\d+),(\d+),(\d+)$', stripped
-            )
+            match = re.match(r'^([\d\.]+)(?:-([\d\.]+))?\s+"([^"]+)"\s+(\d+),(\d+),(\d+)$', stripped)
             if match:
                 start_str = match.group(1)
                 end_str = match.group(2)
@@ -628,7 +597,7 @@ if color_csv_path != "":
     legend_df["value_start"] = legend_df["value_start"].astype(float)
     legend_df["value_end"] = legend_df["value_end"].astype(float)
 
-    with open(mask_csv_path, "r") as f:
+    with open(mask_csv_path) as f:
         lines = f.readlines()
 
         data_lines = [line for line in lines if not line.startswith("#")]
@@ -654,18 +623,16 @@ if color_csv_path != "":
         direction="backward",
     )
 
+    del trace_df
+
     in_range_mask = (color_df["LegendValue"] >= color_df["value_start"]) & (
         color_df["LegendValue"] <= color_df["value_end"]
     )
     color_df = color_df[in_range_mask].copy()
 
-    color_df = color_df[
-        ["ThreadID", "Timestamp", "R", "G", "B", "LegendValue", "value_label"]
-    ]
+    color_df = color_df[["ThreadID", "Timestamp", "R", "G", "B", "LegendValue", "value_label"]]
 
-    nonzero_colors = color_df[
-        (color_df["R"] > 0) | (color_df["G"] > 0) | (color_df["B"] > 0)
-    ]
+    a = "1"
 
 assert isinstance(color_df, DataFrame)
 
@@ -691,33 +658,47 @@ step = max(1, total_rows // 20) if total_rows > 0 else 1
 processed = 0
 if total_rows > 50_000:
     print(
-        f"WARNING: Processing a large number of rows ({total_rows}), this might take a while. Consider zooming "
-        f"into a smaller time range (~50ms) in Paraver before launching CARM for a faster analysis.",
+        f"WARNING: Displaying a large number of rows ({total_rows}) may slow down the UI. Consider zooming "
+        f"into a smaller time range in Paraver before launching CARM for a better experience.",
         flush=True,
     )
 else:
-    print(
-        f"Processing {total_rows} rows for CARM metrics...", flush=True
-    )  # Initial message
+    print(f"Processing {total_rows} rows for CARM metrics...", flush=True)  # Initial message
 
-for index, row in counter_data_df.iterrows():
+
+_time_start = time.time()
+
+# Pre-merge color information into the counter dataframe for O(1) lookups
+# This avoids expensive per-row filtering of `color_df` inside the loop.
+if color_csv_path != "":
+    counter_data_df = pd.merge(
+        counter_data_df,
+        color_df[["ThreadID", "Timestamp", "R", "G", "B", "LegendValue", "value_label"]],
+        on=["ThreadID", "Timestamp"],
+        how="left",
+    )
+else:
+    counter_data_df = counter_data_df.copy()
+
+del color_df
+
+for row in counter_data_df.itertuples(index=False):
     if processed % step == 0 or processed == total_rows:
         # print a progress bar
         progress = processed / total_rows
         bar_width = 20  # Total width of the progress bar
-        segments = int(bar_width * progress)
+        segments = math.ceil(bar_width * progress)
         print(
             f"[{'=' * segments}{'-' * (bar_width - segments)}] {progress * 100:.0f}%",
             end="\r",
             flush=True,
         )
     processed += 1
-
-    duration = row["Duration"] * scaling_unit
-    timestamp = row["Timestamp"]
-    if all(pd.isnull(row[col]) or row[col] == 0 for col in columns_to_check):
+    duration = row.Duration * scaling_unit
+    timestamp = row.Timestamp
+    if all(pd.isnull(getattr(row, col)) or getattr(row, col) == 0 for col in columns_to_check):
         no_flops += 1
-        full_base_statistics["ThreadID"].append(row["ThreadID"])
+        full_base_statistics["ThreadID"].append(row.ThreadID)
         full_base_statistics["Timestamp"].append(timestamp)
         full_base_statistics["Duration"].append(duration)
         full_base_statistics["GFLOPS"].append(0)
@@ -726,38 +707,32 @@ for index, row in counter_data_df.iterrows():
         continue
 
     fp_inst = (
-        row["Intel_FP_Scalar_SP"]
-        + row["Intel_FP_Scalar_DP"]
-        + row["Intel_FP_SSE_SP"]
-        + row["Intel_FP_SSE_DP"]
-        + row["Intel_FP_AVX2_SP"]
-        + row["Intel_FP_AVX2_DP"]
-        + row["Intel_FP_AVX512_SP"]
-        + row["Intel_FP_AVX512_DP"]
+        row.Intel_FP_Scalar_SP
+        + row.Intel_FP_Scalar_DP
+        + row.Intel_FP_SSE_SP
+        + row.Intel_FP_SSE_DP
+        + row.Intel_FP_AVX2_SP
+        + row.Intel_FP_AVX2_DP
+        + row.Intel_FP_AVX512_SP
+        + row.Intel_FP_AVX512_DP
     )
 
     sp_ops = (
-        row["Intel_FP_Scalar_SP"] * 1
-        + row["Intel_FP_SSE_SP"] * 4
-        + row["Intel_FP_AVX2_SP"] * 8
-        + row["Intel_FP_AVX512_SP"] * 16
+        row.Intel_FP_Scalar_SP * 1 + row.Intel_FP_SSE_SP * 4 + row.Intel_FP_AVX2_SP * 8 + row.Intel_FP_AVX512_SP * 16
     )
     dp_ops = (
-        row["Intel_FP_Scalar_DP"] * 1
-        + row["Intel_FP_SSE_DP"] * 2
-        + row["Intel_FP_AVX2_DP"] * 4
-        + row["Intel_FP_AVX512_DP"] * 8
+        row.Intel_FP_Scalar_DP * 1 + row.Intel_FP_SSE_DP * 2 + row.Intel_FP_AVX2_DP * 4 + row.Intel_FP_AVX512_DP * 8
     )
     fp_ops = sp_ops + dp_ops
 
-    mem_ops = row["Intel_Loads"] + row["Intel_Stores"]
+    mem_ops = row.Intel_Loads + row.Intel_Stores
     # Calculate approximate size of memory instructions based on the FP instructions present
     bytes_modifier = (
-        4 * (row["Intel_FP_Scalar_SP"] / fp_inst)
-        + 8 * (row["Intel_FP_Scalar_DP"] / fp_inst)
-        + 16 * ((row["Intel_FP_SSE_SP"] + row["Intel_FP_SSE_DP"]) / fp_inst)
-        + 32 * ((row["Intel_FP_AVX2_SP"] + row["Intel_FP_AVX2_DP"]) / fp_inst)
-        + 64 * ((row["Intel_FP_AVX512_SP"] + row["Intel_FP_AVX512_DP"]) / fp_inst)
+        4 * (row.Intel_FP_Scalar_SP / fp_inst)
+        + 8 * (row.Intel_FP_Scalar_DP / fp_inst)
+        + 16 * ((row.Intel_FP_SSE_SP + row.Intel_FP_SSE_DP) / fp_inst)
+        + 32 * ((row.Intel_FP_AVX2_SP + row.Intel_FP_AVX2_DP) / fp_inst)
+        + 64 * ((row.Intel_FP_AVX512_SP + row.Intel_FP_AVX512_DP) / fp_inst)
     )
     memory_bytes = mem_ops * bytes_modifier
 
@@ -775,7 +750,7 @@ for index, row in counter_data_df.iterrows():
     memory_percent = mem_ops / total_mem_inst
 
     if mem_ops > 0:
-        load_percentage = ut.custom_round((row["Intel_Loads"] / mem_ops) * 100, 1)
+        load_percentage = ut.custom_round((row.Intel_Loads / mem_ops) * 100, 1)
         if load_percentage < 0.1:
             load_percentage = 0.1
     else:
@@ -787,7 +762,7 @@ for index, row in counter_data_df.iterrows():
 
     arithmethic_intensity = fp_ops / memory_bytes
 
-    base_statistics["ThreadID"].append(row["ThreadID"])
+    base_statistics["ThreadID"].append(row.ThreadID)
     base_statistics["Timestamp"].append(timestamp)
     base_statistics["Duration"].append(duration)
     base_statistics["Duration_Percent"].append(duration_percent)
@@ -800,28 +775,19 @@ for index, row in counter_data_df.iterrows():
     base_statistics["Arithmetic_Intensity"].append(float(arithmethic_intensity))
 
     if color_csv_path != "":
-        color_match = color_df[
-            (color_df["Timestamp"] == timestamp)
-            & (color_df["ThreadID"].astype(str) == row["ThreadID"])
-        ]
-        if not color_match.empty:
+        # merged_df contains color columns (may be NaN if no match)
+        if pd.notna(getattr(row, "R", None)) and (
+            (getattr(row, "R", 0) != 0) or (getattr(row, "G", 0) != 0) or (getattr(row, "B", 0) != 0)
+        ):
             match += 1
-            base_statistics["Paraver_Value"].append(
-                color_match["LegendValue"].values[0]
-            )
-            base_statistics["Paraver_Label"].append(
-                color_match["value_label"].values[0]
-            )
-            base_statistics["R"].append(int(color_match["R"].values[0]))
-            base_statistics["G"].append(int(color_match["G"].values[0]))
-            base_statistics["B"].append(int(color_match["B"].values[0]))
+            base_statistics["Paraver_Value"].append(row.LegendValue)
+            base_statistics["Paraver_Label"].append(row.value_label)
+            base_statistics["R"].append(int(row.R))
+            base_statistics["G"].append(int(row.G))
+            base_statistics["B"].append(int(row.B))
 
-            intel_statistics2["Paraver_Label"].append(
-                color_match["value_label"].values[0]
-            )
-            full_base_statistics["Paraver_Label"].append(
-                color_match["value_label"].values[0]
-            )
+            intel_statistics2["Paraver_Label"].append(row.value_label)
+            full_base_statistics["Paraver_Label"].append(row.value_label)
         else:
             base_statistics["Paraver_Value"].append("")
             base_statistics["Paraver_Label"].append("No Label")
@@ -841,33 +807,56 @@ for index, row in counter_data_df.iterrows():
         intel_statistics2["Paraver_Label"].append("")
         full_base_statistics["Paraver_Label"].append("")
 
-    full_base_statistics["ThreadID"].append(row["ThreadID"])
+    full_base_statistics["ThreadID"].append(row.ThreadID)
     full_base_statistics["Timestamp"].append(timestamp)
     full_base_statistics["Duration"].append(duration)
     full_base_statistics["GFLOPS"].append(float(gflops))
     full_base_statistics["Arithmetic_Intensity"].append(float(arithmethic_intensity))
 
-    intel_statistics2["ThreadID"].append(row["ThreadID"])
+    intel_statistics2["ThreadID"].append(row.ThreadID)
     intel_statistics2["Timestamp"].append(timestamp)
-    intel_statistics2["Intel_FP_Scalar_SP"].append(row["Intel_FP_Scalar_SP"])
-    intel_statistics2["Intel_FP_Scalar_DP"].append(row["Intel_FP_Scalar_DP"])
-    intel_statistics2["Intel_FP_SSE_SP"].append(row["Intel_FP_SSE_SP"] * 4)
-    intel_statistics2["Intel_FP_SSE_DP"].append(row["Intel_FP_SSE_DP"] * 2)
-    intel_statistics2["Intel_FP_AVX2_SP"].append(row["Intel_FP_AVX2_SP"] * 8)
-    intel_statistics2["Intel_FP_AVX2_DP"].append(row["Intel_FP_AVX2_DP"] * 4)
-    intel_statistics2["Intel_FP_AVX512_SP"].append(row["Intel_FP_AVX512_SP"] * 16)
-    intel_statistics2["Intel_FP_AVX512_DP"].append(row["Intel_FP_AVX512_DP"] * 8)
+    intel_statistics2["Intel_FP_Scalar_SP"].append(row.Intel_FP_Scalar_SP)
+    intel_statistics2["Intel_FP_Scalar_DP"].append(row.Intel_FP_Scalar_DP)
+    intel_statistics2["Intel_FP_SSE_SP"].append(row.Intel_FP_SSE_SP * 4)
+    intel_statistics2["Intel_FP_SSE_DP"].append(row.Intel_FP_SSE_DP * 2)
+    intel_statistics2["Intel_FP_AVX2_SP"].append(row.Intel_FP_AVX2_SP * 8)
+    intel_statistics2["Intel_FP_AVX2_DP"].append(row.Intel_FP_AVX2_DP * 4)
+    intel_statistics2["Intel_FP_AVX512_SP"].append(row.Intel_FP_AVX512_SP * 16)
+    intel_statistics2["Intel_FP_AVX512_DP"].append(row.Intel_FP_AVX512_DP * 8)
     intel_statistics2["Intel_FP_SP"].append(sp_ops)
     intel_statistics2["Intel_FP_DP"].append(dp_ops)
     intel_statistics2["Intel_FP_Total"].append(fp_ops)
     intel_statistics2["Intel_FP_DP_Percent"].append(dp_percentage)
-    intel_statistics2["Intel_Load"].append(row["Intel_Loads"])
-    intel_statistics2["Intel_Store"].append(row["Intel_Stores"])
+    intel_statistics2["Intel_Load"].append(row.Intel_Loads)
+    intel_statistics2["Intel_Store"].append(row.Intel_Stores)
     intel_statistics2["Intel_Load_Percent"].append(load_percentage)
+
+# Get memory usage of all objects > 1 MB, sorted by size
+objects = []
+for name, obj in list(globals().items()):
+    size = sys.getsizeof(obj)
+    if size > 1_000_000:  # 1 MB
+        objects.append((name, size))
+
+# Sort by size (biggest first)
+objects.sort(key=lambda x: x[1], reverse=True)
+
+# Print results
+print("\nObjects > 1 MB (sorted by size):")
+print("-" * 50)
+for name, size in objects:
+    size_mb = size / (1024 * 1024)
+    print(f"{name:30s}: {size_mb:8.2f} MB")
+
+del counter_data_df
 
 # finish progress line
 if total_rows > 0:
     print()
+
+_runtime = time.time() - _time_start
+print(f"Finished processing {total_rows} rows in {_runtime:.2f} seconds. ")
+
 
 base_statistics_df = pd.DataFrame(base_statistics)
 full_base_statistics_df = pd.DataFrame(full_base_statistics)
@@ -1070,9 +1059,7 @@ sidebar = dbc.Offcanvas(
                                     html_for="line-legend-switch",
                                     style={"marginRight": "70px"},
                                 ),
-                                dbc.Switch(
-                                    id="line-legend-switch", label="", value=True
-                                ),
+                                dbc.Switch(id="line-legend-switch", label="", value=True),
                             ],
                             style={"display": "flex", "alignItems": "center"},
                         ),
@@ -1437,12 +1424,8 @@ sidebar2 = dbc.Offcanvas(
 # Main app layout
 app.layout = dbc.Container(
     [
-        dcc.Interval(
-            id="interval-component", interval=1000, n_intervals=0, disabled=True
-        ),
-        dcc.Interval(
-            id="paraver-sync-check", interval=1000, n_intervals=0, disabled=True
-        ),
+        dcc.Interval(id="interval-component", interval=1000, n_intervals=0, disabled=True),
+        dcc.Interval(id="paraver-sync-check", interval=1000, n_intervals=0, disabled=True),
         dcc.Store(id="paraver-sync-timestamps", data=[]),
         dcc.Download(id="download-csv"),
         dbc.Row(
@@ -1471,7 +1454,7 @@ app.layout = dbc.Container(
                                 "label": machine_name,
                                 "value": os.path.join(carm_pathway, file),
                             }
-                            for machine_name, file in zip(machine_names, csv_files)
+                            for machine_name, file in zip(machine_names, csv_files, strict=True)
                         ],
                         multi=False,
                         placeholder="Select Machine Results...",
@@ -1601,9 +1584,7 @@ app.layout = dbc.Container(
                                                                 "margin-bottom": "10px",
                                                             },
                                                         ),
-                                                        dcc.Store(
-                                                            id="data-points-store"
-                                                        ),
+                                                        dcc.Store(id="data-points-store"),
                                                         html.Div(
                                                             [
                                                                 html.Button(
@@ -1739,12 +1720,8 @@ app.layout = dbc.Container(
             id="slider-components",
             style={"display": "none"},
         ),
-        html.Div(
-            id="graph-size-data", style={"whiteSpace": "pre-wrap", "display": "none"}
-        ),
-        html.Div(
-            id="graph-size-update", style={"whiteSpace": "pre-wrap", "display": "none"}
-        ),
+        html.Div(id="graph-size-data", style={"whiteSpace": "pre-wrap", "display": "none"}),
+        html.Div(id="graph-size-update", style={"whiteSpace": "pre-wrap", "display": "none"}),
         dcc.Store(id="store-dimensions"),
         dcc.Store(id="graph-lines"),
         dcc.Store(id="graph-lines2"),
@@ -1833,9 +1810,7 @@ app.layout = dbc.Container(
                             [
                                 html.Div(
                                     [
-                                        html.Label(
-                                            "Size:", style={"marginRight": "10px"}
-                                        ),
+                                        html.Label("Size:", style={"marginRight": "10px"}),
                                         dcc.Input(
                                             id="dot-size-input",
                                             type="number",
@@ -1848,9 +1823,7 @@ app.layout = dbc.Container(
                                                 "width": "45px",
                                             },
                                         ),
-                                        html.Label(
-                                            "Shape:", style={"marginRight": "10px"}
-                                        ),
+                                        html.Label("Shape:", style={"marginRight": "10px"}),
                                         dcc.Dropdown(
                                             id="dot-symbol-dropdown",
                                             options=[
@@ -2056,30 +2029,20 @@ def update_slider_from_csv(
 
         except Exception:
             first_load += 1
-            raise PreventUpdate
+            raise PreventUpdate from None
 
         ctx = callback_context
         if not ctx.triggered:
             raise PreventUpdate
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
-        if new_timestamps != current_file_timestamps or trigger_id in [
-            "button-paraver-sync"
-        ]:
+        if new_timestamps != current_file_timestamps or trigger_id in ["button-paraver-sync"]:
             first_load += 1
             current_file_timestamps = new_timestamps
             if first_load > 1:
                 try:
-                    start_index = (
-                        (full_base_statistics_df["Timestamp"] - new_timestamps[0])
-                        .abs()
-                        .idxmin()
-                    )
-                    end_index = (
-                        (full_base_statistics_df["Timestamp"] - new_timestamps[1])
-                        .abs()
-                        .idxmin()
-                    )
+                    start_index = (full_base_statistics_df["Timestamp"] - new_timestamps[0]).abs().idxmin()
+                    end_index = (full_base_statistics_df["Timestamp"] - new_timestamps[1]).abs().idxmin()
                     if mask_button_offset != -1:
                         if (mask_button + mask_button_offset) % 2 == 1:
                             use_paraver_mask = False
@@ -2105,44 +2068,26 @@ def update_slider_from_csv(
                         min_bound=adjusted_start_index,
                     )
 
-                    matching_start_timestamp = full_base_statistics_df.loc[
-                        adjusted_start_index, "Timestamp"
-                    ]
-                    matching_end_timestamp = full_base_statistics_df.loc[
-                        adjusted_end_index, "Timestamp"
-                    ]
+                    matching_start_timestamp = full_base_statistics_df.loc[adjusted_start_index, "Timestamp"]
+                    matching_end_timestamp = full_base_statistics_df.loc[adjusted_end_index, "Timestamp"]
 
                     if use_paraver_mask:
                         filtered_base = base_statistics_df[
-                            (
-                                base_statistics_df["Arithmetic_Intensity"]
-                                >= float(lower_filter)
-                            )
+                            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
                             & (base_statistics_df["GFLOPS"] >= float(lower_filter))
                             & (base_statistics_df["Duration"] >= float(duration_filter))
-                            & (
-                                base_statistics_df["Paraver_Value"].apply(
-                                    ut.is_valid_paraver_value
-                                )
-                            )
+                            & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
                         ]
                     else:
                         filtered_base = base_statistics_df[
-                            (
-                                base_statistics_df["Arithmetic_Intensity"]
-                                >= float(lower_filter)
-                            )
+                            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
                             & (base_statistics_df["GFLOPS"] >= float(lower_filter))
                             & (base_statistics_df["Duration"] >= float(duration_filter))
                         ]
                     filtered_base = filtered_base.reset_index(drop=True)
 
-                    new_start_index = filtered_base[
-                        filtered_base["Timestamp"] == matching_start_timestamp
-                    ].index[0]
-                    new_end_index = filtered_base[
-                        filtered_base["Timestamp"] == matching_end_timestamp
-                    ].index[0]
+                    new_start_index = filtered_base[filtered_base["Timestamp"] == matching_start_timestamp].index[0]
+                    new_end_index = filtered_base[filtered_base["Timestamp"] == matching_end_timestamp].index[0]
 
                 except Exception as e:
                     if no_sync:
@@ -2152,7 +2097,7 @@ def update_slider_from_csv(
                             flush=True,
                         )
                         no_sync = False
-                    raise dash.exceptions.PreventUpdate
+                    raise PreventUpdate from None
 
                 new_slider_indices = [int(new_start_index), int(new_end_index)]
 
@@ -2229,10 +2174,6 @@ def update_slider_from_csv(
     prevent_initial_call=True,
 )
 def generate_csv(n_clicks, lines):
-    if lines is None:
-        print("Graph lines data is None, cannot generate roof labels CSV.", flush=True)
-        return
-
     global full_base_statistics_df, path, time_unit
     ctx = callback_context
     if not ctx.triggered:
@@ -2242,12 +2183,14 @@ def generate_csv(n_clicks, lines):
     if trigger_id != "button-roof-labels":
         raise PreventUpdate
 
+    if lines is None:
+        print("Graph lines data is None, cannot generate roof labels CSV.", flush=True)
+        return
+
     df: pd.DataFrame = full_base_statistics_df.copy()
     df["Roof Label"] = df.apply(lambda row: ut.label_cache_level(row, lines), axis=1)
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{path}:{time_unit}:window_in_code_mode:1:6"
-    )
+    metadata_line = f"#{timestamp}:CSV:RUNAPP:{path}:{time_unit}:window_in_code_mode:1:6"
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "Roof Label"]]
     # natural sort on the thread ID column so values like "1.1.10" come after
@@ -2269,7 +2212,7 @@ def generate_csv(n_clicks, lines):
         [2, "L2", 0, 0, 255],  # Blue
         [3, "L3", 255, 165, 0],  # Orange
         [4, "DRAM", 255, 0, 0],  # Red
-        [5, "No Floating Point Oprations Found", 75, 0, 130],  # Indigo
+        [5, "No Floating Point Operations Found", 75, 0, 130],  # Indigo
         [6, "Above L1", 255, 192, 203],  # Pink
     ]
     with open(roof_labels_filepath, "w") as f:
@@ -2305,7 +2248,7 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
             how="left",
         )
         unique_percentages = df["Intel_Load_Percent"].dropna().unique()
-        df["Intel_Load_Percent"] = df["Intel_Load_Percent"].fillna(int(0))
+        df["Intel_Load_Percent"] = df["Intel_Load_Percent"].fillna(0)
     elif trigger_id == "button-carm-spdp-colors":
         df = df.merge(
             intel_statistics_df2[["Timestamp", "ThreadID", "Intel_FP_DP_Percent"]],
@@ -2313,16 +2256,14 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
             how="left",
         )
         unique_percentages = df["Intel_FP_DP_Percent"].dropna().unique()
-        df["Intel_FP_DP_Percent"] = df["Intel_FP_DP_Percent"].fillna(int(0))
+        df["Intel_FP_DP_Percent"] = df["Intel_FP_DP_Percent"].fillna(0)
 
     unique_percentages.sort()
     color_map = []
 
     for percentage in unique_percentages:
         if trigger_id == "button-carm-ldst-colors":
-            r, g, b = ut.blend_colors(
-                0, 0, 0, 0, 0, percentage, 0, "LD/ST Percentage", True
-            )
+            r, g, b = ut.blend_colors(0, 0, 0, 0, 0, percentage, 0, "LD/ST Percentage", True)
             extra_string = "Loads"
 
         elif trigger_id == "button-carm-spdp-colors":
@@ -2625,8 +2566,7 @@ def generate_angle_inputs(graph):
                                                         },
                                                         className="mb-0",
                                                         style={"alignSelf": "center"},
-                                                        value=ann.get("opacity", 1)
-                                                        == 1,
+                                                        value=ann.get("opacity", 1) == 1,
                                                     ),
                                                 ],
                                                 style={
@@ -2648,9 +2588,7 @@ def generate_angle_inputs(graph):
                                                     dbc.Input(
                                                         type="number",
                                                         placeholder="Angle",
-                                                        value=round(
-                                                            ann.get("textangle", 0)
-                                                        ),
+                                                        value=round(ann.get("textangle", 0)),
                                                         id={
                                                             "type": "angle-input",
                                                             "index": i,
@@ -2737,8 +2675,7 @@ def generate_angle_inputs(graph):
                                                         },
                                                         className="mb-0",
                                                         style={"alignSelf": "center"},
-                                                        value=ann.get("opacity", 1)
-                                                        == 1,
+                                                        value=ann.get("opacity", 1) == 1,
                                                     ),
                                                 ],
                                                 style={
@@ -2760,9 +2697,7 @@ def generate_angle_inputs(graph):
                                                     dbc.Input(
                                                         type="number",
                                                         placeholder="Angle",
-                                                        value=round(
-                                                            ann.get("textangle", 0)
-                                                        ),
+                                                        value=round(ann.get("textangle", 0)),
                                                         id={
                                                             "type": "angle-input",
                                                             "index": i,
@@ -2804,9 +2739,7 @@ def generate_angle_inputs(graph):
             )
             cards.append(card)
 
-        accordion_item = dbc.AccordionItem(
-            title="Custom Annotations", children=cards, item_id="other_annotations"
-        )
+        accordion_item = dbc.AccordionItem(title="Custom Annotations", children=cards, item_id="other_annotations")
         accordion_items.append(accordion_item)
 
     return accordion_items
@@ -2956,9 +2889,7 @@ def update_additional_dropdowns(selected_file):
         if selected_file:
             if not df.empty:
                 if field == "Date":
-                    unique_values = sorted(
-                        df[field.replace(" ", "")].unique(), reverse=True
-                    )
+                    unique_values = sorted(df[field.replace(" ", "")].unique(), reverse=True)
                 else:
                     unique_values = sorted(df[field.replace(" ", "")].unique())
                 options = [{"label": value, "value": value} for value in unique_values]
@@ -3056,9 +2987,7 @@ def update_additional_dropdowns2(selected_file):
         if selected_file:
             if not df.empty:
                 if field == "Date":
-                    unique_values = sorted(
-                        df[field.replace(" ", "")].unique(), reverse=True
-                    )
+                    unique_values = sorted(df[field.replace(" ", "")].unique(), reverse=True)
                 else:
                     unique_values = sorted(df[field.replace(" ", "")].unique())
                 options = [{"label": value, "value": value} for value in unique_values]
@@ -3186,10 +3115,7 @@ def chained_callback_ISA(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["ISA"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["ISA"].unique())]
 
 
 @app.callback(
@@ -3205,9 +3131,7 @@ def chained_callback_ISA(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Precision(
-    ISA, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Precision(ISA, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return []
@@ -3240,10 +3164,7 @@ def chained_callback_Precision(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Precision"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Precision"].unique())]
 
 
 @app.callback(
@@ -3259,9 +3180,7 @@ def chained_callback_Precision(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Threads(
-    ISA, Precision, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Threads(ISA, Precision, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3291,10 +3210,7 @@ def chained_callback_Threads(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Threads"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Threads"].unique())]
 
 
 @app.callback(
@@ -3310,9 +3226,7 @@ def chained_callback_Threads(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Loads(
-    ISA, Precision, Threads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Loads(ISA, Precision, Threads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3342,10 +3256,7 @@ def chained_callback_Loads(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Loads"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Loads"].unique())]
 
 
 @app.callback(
@@ -3361,9 +3272,7 @@ def chained_callback_Loads(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Stores(
-    ISA, Precision, Threads, Loads, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Stores(ISA, Precision, Threads, Loads, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3393,10 +3302,7 @@ def chained_callback_Stores(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Stores"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Stores"].unique())]
 
 
 @app.callback(
@@ -3412,9 +3318,7 @@ def chained_callback_Stores(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Interleaved(
-    ISA, Precision, Threads, Loads, Stores, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Interleaved(ISA, Precision, Threads, Loads, Stores, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3444,10 +3348,7 @@ def chained_callback_Interleaved(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Interleaved"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Interleaved"].unique())]
 
 
 @app.callback(
@@ -3463,9 +3364,7 @@ def chained_callback_Interleaved(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_DRAMBytes(
-    ISA, Precision, Threads, Loads, Stores, Interleaved, FPInst, Date, selected_file
-):
+def chained_callback_DRAMBytes(ISA, Precision, Threads, Loads, Stores, Interleaved, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3495,10 +3394,7 @@ def chained_callback_DRAMBytes(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["DRAMBytes"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["DRAMBytes"].unique())]
 
 
 @app.callback(
@@ -3514,9 +3410,7 @@ def chained_callback_DRAMBytes(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_FPInst(
-    ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, Date, selected_file
-):
+def chained_callback_FPInst(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3546,10 +3440,7 @@ def chained_callback_FPInst(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["FPInst"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["FPInst"].unique())]
 
 
 @app.callback(
@@ -3605,10 +3496,7 @@ def chained_callback_Date(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Date"].unique(), reverse=True)
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Date"].unique(), reverse=True)]
 
 
 @app.callback(
@@ -3664,10 +3552,7 @@ def chained_callback_ISA2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["ISA"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["ISA"].unique())]
 
 
 @app.callback(
@@ -3683,9 +3568,7 @@ def chained_callback_ISA2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Precision2(
-    ISA, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Precision2(ISA, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return []
@@ -3718,10 +3601,7 @@ def chained_callback_Precision2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Precision"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Precision"].unique())]
 
 
 @app.callback(
@@ -3737,9 +3617,7 @@ def chained_callback_Precision2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Threads2(
-    ISA, Precision, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Threads2(ISA, Precision, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3769,10 +3647,7 @@ def chained_callback_Threads2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Threads"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Threads"].unique())]
 
 
 @app.callback(
@@ -3788,9 +3663,7 @@ def chained_callback_Threads2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Loads2(
-    ISA, Precision, Threads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Loads2(ISA, Precision, Threads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3820,10 +3693,7 @@ def chained_callback_Loads2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Loads"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Loads"].unique())]
 
 
 @app.callback(
@@ -3839,9 +3709,7 @@ def chained_callback_Loads2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Stores2(
-    ISA, Precision, Threads, Loads, Interleaved, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Stores2(ISA, Precision, Threads, Loads, Interleaved, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3871,10 +3739,7 @@ def chained_callback_Stores2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Stores"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Stores"].unique())]
 
 
 @app.callback(
@@ -3890,9 +3755,7 @@ def chained_callback_Stores2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_Interleaved2(
-    ISA, Precision, Threads, Loads, Stores, DRAMBytes, FPInst, Date, selected_file
-):
+def chained_callback_Interleaved2(ISA, Precision, Threads, Loads, Stores, DRAMBytes, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3922,10 +3785,7 @@ def chained_callback_Interleaved2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Interleaved"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Interleaved"].unique())]
 
 
 @app.callback(
@@ -3941,9 +3801,7 @@ def chained_callback_Interleaved2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_DRAMBytes2(
-    ISA, Precision, Threads, Loads, Stores, Interleaved, FPInst, Date, selected_file
-):
+def chained_callback_DRAMBytes2(ISA, Precision, Threads, Loads, Stores, Interleaved, FPInst, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -3973,10 +3831,7 @@ def chained_callback_DRAMBytes2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["DRAMBytes"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["DRAMBytes"].unique())]
 
 
 @app.callback(
@@ -3992,9 +3847,7 @@ def chained_callback_DRAMBytes2(
     Input("filename", "value"),
     prevent_initial_call=True,
 )
-def chained_callback_FPInst2(
-    ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, Date, selected_file
-):
+def chained_callback_FPInst2(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, Date, selected_file):
     # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
     if not selected_file:
         return html.Div([])
@@ -4024,10 +3877,7 @@ def chained_callback_FPInst2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["FPInst"].unique())
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["FPInst"].unique())]
 
 
 @app.callback(
@@ -4083,10 +3933,7 @@ def chained_callback_Date2(
         query = " and ".join(query_conditions)
         df = df.query(query)
 
-    return [
-        {"label": precision, "value": precision}
-        for precision in sorted(df["Date"].unique(), reverse=True)
-    ]
+    return [{"label": precision, "value": precision} for precision in sorted(df["Date"].unique(), reverse=True)]
 
 
 @app.callback(
@@ -4282,23 +4129,15 @@ def analysis(
     filtered_intel = filtered_intel.reset_index(drop=True)
 
     # Get timestamp range to display and filter timestamps dataframe accodingly
-    timestampls_real_range = [
-        (x * timestamps_grouper + timestamps_max_range[0]) for x in timestamps_range
-    ]
+    timestampls_real_range = [(x * timestamps_grouper + timestamps_max_range[0]) for x in timestamps_range]
     if timestamps_range[1] == 0:
         timestampls_real_range[1] = timestamps_grouper - 1
 
     if (timestampls_real_range[1] + timestamps_grouper) > (timestamps_max_range[1] + 1):
-        df_filter = filtered_base.iloc[
-            timestampls_real_range[0] : timestamps_max_range[1] + 1
-        ]
-        df_intel_filter = filtered_intel.iloc[
-            timestampls_real_range[0] : timestamps_max_range[1] + 1
-        ]
+        df_filter = filtered_base.iloc[timestampls_real_range[0] : timestamps_max_range[1] + 1]
+        df_intel_filter = filtered_intel.iloc[timestampls_real_range[0] : timestamps_max_range[1] + 1]
     else:
-        df_filter = filtered_base.iloc[
-            timestampls_real_range[0] : timestampls_real_range[1] + timestamps_grouper
-        ]
+        df_filter = filtered_base.iloc[timestampls_real_range[0] : timestampls_real_range[1] + timestamps_grouper]
         df_intel_filter = filtered_intel.iloc[
             timestampls_real_range[0] : timestampls_real_range[1] + timestamps_grouper
         ]
@@ -4308,19 +4147,13 @@ def analysis(
         df_intel_filter, ISA_timestamp, Precision_timestamp, Threads_timestamp
     )
     df_filter = df_filter[df_filter.index.isin(df_intel_filter2.index)]
-    columns_to_check = df_intel_filter2.drop(
-        columns=["ThreadID", "Paraver_Label", "Timestamp"], errors="ignore"
-    )
+    columns_to_check = df_intel_filter2.drop(columns=["ThreadID", "Paraver_Label", "Timestamp"], errors="ignore")
 
     # Check what ISAs are still being used to adjust the roofline plot shown
     if float(lower_filter) > 0:
-        positive_columns = columns_to_check.columns[
-            (columns_to_check >= float(lower_filter)).any()
-        ].tolist()
+        positive_columns = columns_to_check.columns[(columns_to_check >= float(lower_filter)).any()].tolist()
     else:
-        positive_columns = columns_to_check.columns[
-            (columns_to_check > 0).any()
-        ].tolist()
+        positive_columns = columns_to_check.columns[(columns_to_check > 0).any()].tolist()
     if "ThreadID" in df_intel_filter2.columns:
         positive_columns.append("ThreadID")
     if ISA is None:
@@ -4345,9 +4178,7 @@ def analysis(
         FPInst2,
         Date2,
     )
-    query1 = ut.construct_query(
-        ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date
-    )
+    query1 = ut.construct_query(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date)
     # If user selects nothing yet, use the most recent roofline result
     filtered_df1 = df.query(query1) if query1 else df
 
@@ -4401,9 +4232,7 @@ def analysis(
             extra_average = " Averaged "
             # Create a grouping variable based on 'timestamps_grouper'
             df_filter = df_filter.copy()
-            df_filter["group"] = (
-                (df_filter.index - timestampls_real_range[0]) // timestamps_grouper
-            ).astype(int)
+            df_filter["group"] = ((df_filter.index - timestampls_real_range[0]) // timestamps_grouper).astype(int)
             df_filter["ai"] = df_filter["Arithmetic_Intensity"]
             df_filter["gflops"] = df_filter["GFLOPS"]
             df_filter["timestamp"] = df_filter["Timestamp"]
@@ -4422,56 +4251,33 @@ def analysis(
             # Create labels by joining the timestamps involved in each group
             timestamps_grouped = (
                 grouped["timestamp"]
-                .apply(
-                    lambda x: f"{x.iloc[0]}"
-                    if len(x) == 1
-                    else f"{x.iloc[0]}...{x.iloc[-1]}"
-                )
+                .apply(lambda x: f"{x.iloc[0]}" if len(x) == 1 else f"{x.iloc[0]}...{x.iloc[-1]}")
                 .reset_index(drop=True)
             )
 
             df_intel_filter2 = df_intel_filter2.copy()
             df_intel_filter2["group"] = (
-                (df_intel_filter2.index - timestampls_real_range[0])
-                // timestamps_grouper
+                (df_intel_filter2.index - timestampls_real_range[0]) // timestamps_grouper
             ).astype(int)
             grouped_intel = df_intel_filter2.groupby("group")
 
-            scalar_sp_mean = (
-                grouped_intel["Intel_FP_Scalar_SP"].mean().reset_index(drop=True)
-            )
-            scalar_dp_mean = (
-                grouped_intel["Intel_FP_Scalar_DP"].mean().reset_index(drop=True)
-            )
+            scalar_sp_mean = grouped_intel["Intel_FP_Scalar_SP"].mean().reset_index(drop=True)
+            scalar_dp_mean = grouped_intel["Intel_FP_Scalar_DP"].mean().reset_index(drop=True)
             sse_sp_mean = grouped_intel["Intel_FP_SSE_SP"].mean().reset_index(drop=True)
             sse_dp_mean = grouped_intel["Intel_FP_SSE_DP"].mean().reset_index(drop=True)
-            avx2_sp_mean = (
-                grouped_intel["Intel_FP_AVX2_SP"].mean().reset_index(drop=True)
-            )
-            avx2_dp_mean = (
-                grouped_intel["Intel_FP_AVX2_DP"].mean().reset_index(drop=True)
-            )
-            avx512_sp_mean = (
-                grouped_intel["Intel_FP_AVX512_SP"].mean().reset_index(drop=True)
-            )
-            avx512_dp_mean = (
-                grouped_intel["Intel_FP_AVX512_DP"].mean().reset_index(drop=True)
-            )
+            avx2_sp_mean = grouped_intel["Intel_FP_AVX2_SP"].mean().reset_index(drop=True)
+            avx2_dp_mean = grouped_intel["Intel_FP_AVX2_DP"].mean().reset_index(drop=True)
+            avx512_sp_mean = grouped_intel["Intel_FP_AVX512_SP"].mean().reset_index(drop=True)
+            avx512_dp_mean = grouped_intel["Intel_FP_AVX512_DP"].mean().reset_index(drop=True)
             dp_mean = grouped_intel["Intel_FP_DP"].mean().reset_index(drop=True)
-            fp_total_mean = (
-                grouped_intel["Intel_FP_Total"].mean().reset_index(drop=True)
-            )
+            fp_total_mean = grouped_intel["Intel_FP_Total"].mean().reset_index(drop=True)
             load_mean = grouped_intel["Intel_Load"].mean().reset_index(drop=True)
             store_mean = grouped_intel["Intel_Store"].mean().reset_index(drop=True)
 
-            scalar_perc = (
-                ((scalar_sp_mean + scalar_dp_mean) / fp_total_mean) * 100
-            ).tolist()
+            scalar_perc = (((scalar_sp_mean + scalar_dp_mean) / fp_total_mean) * 100).tolist()
             sse_perc = (((sse_sp_mean + sse_dp_mean) / fp_total_mean) * 100).tolist()
             avx2_perc = (((avx2_sp_mean + avx2_dp_mean) / fp_total_mean) * 100).tolist()
-            avx512_perc = (
-                ((avx512_sp_mean + avx512_dp_mean) / fp_total_mean) * 100
-            ).tolist()
+            avx512_perc = (((avx512_sp_mean + avx512_dp_mean) / fp_total_mean) * 100).tolist()
             dp_perc = ((dp_mean / fp_total_mean) * 100).tolist()
             load_perc = ((load_mean / (load_mean + store_mean)) * 100).tolist()
 
@@ -4483,32 +4289,22 @@ def analysis(
                 df = df_filter.copy()
                 df_intel = df_intel_filter2.copy()
                 df = df.sort_values(by=["ThreadID", "Timestamp"]).reset_index(drop=True)
-                df_intel = df_intel.sort_values(
-                    by=["ThreadID", "Timestamp"]
-                ).reset_index(drop=True)
+                df_intel = df_intel.sort_values(by=["ThreadID", "Timestamp"]).reset_index(drop=True)
 
                 df["label_shift"] = df.groupby("ThreadID")["Paraver_Label"].shift()
                 df["label_changed"] = df["Paraver_Label"] != df["label_shift"]
-                df_intel["label_shift"] = df_intel.groupby("ThreadID")[
-                    "Paraver_Label"
-                ].shift()
-                df_intel["label_changed"] = (
-                    df_intel["Paraver_Label"] != df_intel["label_shift"]
-                )
+                df_intel["label_shift"] = df_intel.groupby("ThreadID")["Paraver_Label"].shift()
+                df_intel["label_changed"] = df_intel["Paraver_Label"] != df_intel["label_shift"]
 
                 df["group"] = df.groupby("ThreadID")["label_changed"].cumsum()
-                df_intel["group"] = df_intel.groupby("ThreadID")[
-                    "label_changed"
-                ].cumsum()
+                df_intel["group"] = df_intel.groupby("ThreadID")["label_changed"].cumsum()
 
                 df_filter = (
                     df.groupby(["ThreadID", "group"])
                     .agg(
                         {
                             "ThreadID": "first",
-                            "Timestamp": lambda x: f"{x.min()}"
-                            if x.min() == x.max()
-                            else f"{x.min()} - {x.max()}",
+                            "Timestamp": lambda x: f"{x.min()}" if x.min() == x.max() else f"{x.min()} - {x.max()}",
                             "Duration": "sum",
                             "Paraver_Label": "first",
                             "Paraver_Value": "first",
@@ -4549,9 +4345,7 @@ def analysis(
 
                 df_filter["GFLOPS"] = df_filter["FLOP"] / (df_filter["Duration"] * 1e3)
                 df_filter["Bandwidth"] = df_filter["Bytes"] / df_filter["Duration"]
-                df_filter["Arithmetic_Intensity"] = (
-                    df_filter["FLOP"] / df_filter["Bytes"]
-                )
+                df_filter["Arithmetic_Intensity"] = df_filter["FLOP"] / df_filter["Bytes"]
 
                 df.drop(columns=["group"], inplace=True)
 
@@ -4575,70 +4369,43 @@ def analysis(
 
             scalar_perc = (
                 (
-                    (
-                        df_intel_filter2["Intel_FP_Scalar_SP"]
-                        + df_intel_filter2["Intel_FP_Scalar_DP"]
-                    )
+                    (df_intel_filter2["Intel_FP_Scalar_SP"] + df_intel_filter2["Intel_FP_Scalar_DP"])
                     / df_intel_filter2["Intel_FP_Total"]
                 )
                 * 100
             ).tolist()
             sse_perc = (
                 (
-                    (
-                        df_intel_filter2["Intel_FP_SSE_SP"]
-                        + df_intel_filter2["Intel_FP_SSE_DP"]
-                    )
+                    (df_intel_filter2["Intel_FP_SSE_SP"] + df_intel_filter2["Intel_FP_SSE_DP"])
                     / df_intel_filter2["Intel_FP_Total"]
                 )
                 * 100
             ).tolist()
             avx2_perc = (
                 (
-                    (
-                        df_intel_filter2["Intel_FP_AVX2_SP"]
-                        + df_intel_filter2["Intel_FP_AVX2_DP"]
-                    )
+                    (df_intel_filter2["Intel_FP_AVX2_SP"] + df_intel_filter2["Intel_FP_AVX2_DP"])
                     / df_intel_filter2["Intel_FP_Total"]
                 )
                 * 100
             ).tolist()
             avx512_perc = (
                 (
-                    (
-                        df_intel_filter2["Intel_FP_AVX512_SP"]
-                        + df_intel_filter2["Intel_FP_AVX512_DP"]
-                    )
+                    (df_intel_filter2["Intel_FP_AVX512_SP"] + df_intel_filter2["Intel_FP_AVX512_DP"])
                     / df_intel_filter2["Intel_FP_Total"]
                 )
                 * 100
             ).tolist()
             if use_accumulate:
-                dp_perc = (
-                    (
-                        df_intel_filter2["Intel_FP_DP"]
-                        / df_intel_filter2["Intel_FP_Total"]
-                    )
-                    * 100
-                ).tolist()
+                dp_perc = ((df_intel_filter2["Intel_FP_DP"] / df_intel_filter2["Intel_FP_Total"]) * 100).tolist()
                 load_perc = (
                     (
                         df_intel_filter2["Intel_Load"]
-                        / (
-                            df_intel_filter2["Intel_Load"]
-                            + df_intel_filter2["Intel_Store"]
-                        )
+                        / (df_intel_filter2["Intel_Load"] + df_intel_filter2["Intel_Store"])
                     )
                     * 100
                 ).tolist()
             else:
-                dp_perc = (
-                    (
-                        df_intel_filter2["Intel_FP_DP"]
-                        / df_intel_filter2["Intel_FP_Total"]
-                    )
-                    * 100
-                ).tolist()
+                dp_perc = ((df_intel_filter2["Intel_FP_DP"] / df_intel_filter2["Intel_FP_Total"]) * 100).tolist()
                 load_perc = (df_intel_filter2["Intel_Load_Percent"]).tolist()
 
         # If the play function is activated
@@ -4697,7 +4464,7 @@ def analysis(
                     y=[gflops_mean[indexer]],
                     mode="markers",
                     name=f"{name_app}{extra_average}Timestamps",
-                    marker=dict(size=dot_size, color=color),
+                    marker={"size": dot_size, "color": color},
                     legendgroup="1",
                     showlegend=first,
                     text=[tooltip_text],
@@ -4743,6 +4510,7 @@ def analysis(
                     blues,
                     pvalues,
                     plabels,
+                    strict=False,
                 )
             ):
                 if use_paraver_mask:
@@ -4773,9 +4541,7 @@ def analysis(
                                     False,
                                 )
                             else:
-                                color = ut.interpolate_color(
-                                    start_color, end_color, index / n
-                                )
+                                color = ut.interpolate_color(start_color, end_color, index / n)
 
                         tooltip_text = ut.build_timestamp_tooltip_text(
                             scalar,
@@ -4801,7 +4567,7 @@ def analysis(
                                 y=[gflops_value],
                                 mode="markers",
                                 name=f"{name_app}{extra_average}{plabel} Timestamps",
-                                marker=dict(size=dot_size, color=color),
+                                marker={"size": dot_size, "color": color},
                                 showlegend=first,
                                 text=[tooltip_text],
                                 hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
@@ -4837,9 +4603,7 @@ def analysis(
                                 False,
                             )
                         else:
-                            color = ut.interpolate_color(
-                                start_color, end_color, index / n
-                            )
+                            color = ut.interpolate_color(start_color, end_color, index / n)
                     tooltip_text = ut.build_timestamp_tooltip_text(
                         scalar,
                         sse,
@@ -4864,7 +4628,7 @@ def analysis(
                             y=[gflops_value],
                             mode="markers",
                             name=f"{name_app}{extra_average}{plabel} Timestamps",
-                            marker=dict(size=dot_size, color=color),
+                            marker={"size": dot_size, "color": color},
                             showlegend=first,
                             text=[tooltip_text],
                             hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
@@ -4876,9 +4640,7 @@ def analysis(
     if trigger_id not in ["interval-component"]:
         # If we want to plot the total dot
         if plot_total:
-            tooltip = ut.build_total_tooltip_text(
-                name_app, threads_app, totals, total_FP_inst, total_mem_inst
-            )
+            tooltip = ut.build_total_tooltip_text(name_app, threads_app, totals, total_FP_inst, total_mem_inst)
             smallest_gflops = min(gflops, smallest_gflops)
             smallest_ai = min(ai, smallest_ai)
 
@@ -4888,7 +4650,7 @@ def analysis(
                     y=[gflops],
                     mode="markers",
                     name=f"{name_app} Total",
-                    marker=dict(size=dot_size, color="red"),
+                    marker={"size": dot_size, "color": "red"},
                     text=[tooltip],
                     hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
                 )
@@ -4900,9 +4662,7 @@ def analysis(
                 "font_size": tooltip_size,
             },
             title={
-                "text": "Cache Aware Roofline Model" + " (per thread)"
-                if normalize
-                else "",
+                "text": "Cache Aware Roofline Model" + " (per thread)" if normalize else "",
                 "y": 0.95,
                 "x": 0.5,
                 "xanchor": "center",
@@ -4952,9 +4712,7 @@ def analysis(
 
     # Plot the roofline lines if possible, based on the data range and calculate angles for the annotations
     if not filtered_df1.empty:
-        values1 = filtered_df1.iloc[-1][
-            ["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]
-        ].tolist()
+        values1 = filtered_df1.iloc[-1][["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]].tolist()
         ISA = filtered_df1.iloc[-1][["ISA"]].tolist()
         # scale down bandwidth and compute ceilings if normalization requested
         if normalize:
@@ -4972,11 +4730,7 @@ def analysis(
                         # ignore non-numeric labels (e.g. FPInst at index 6)
                         pass
         lines = ut.calculate_roofline(values1, smallest_ai / 5)
-        if (
-            lines != lines_origin
-            and len(lines_origin) > 0
-            and trigger_id != "interval-component"
-        ):
+        if lines != lines_origin and len(lines_origin) > 0 and trigger_id != "interval-component":
             change_annotation = 1
             annotations = {}
         lines_origin = lines
@@ -4984,11 +4738,7 @@ def analysis(
         smallest_gflops = min(smallest_gflops, lines["DRAM"]["start"][1])
         # If its just a zoom we dont plot the lines again, just re-calculate the angles for the annotations
         if trigger_id not in ["graphs", "interval-component"]:
-            figure.add_traces(
-                ut.plot_roofline(
-                    values1, lines, "", ISA[0], line_legend, int(line_size)
-                )
-            )
+            figure.add_traces(ut.plot_roofline(values1, lines, "", ISA[0], line_legend, int(line_size)))
 
         # Grab the axis range of the plot, after its reset or not
         xaxis_range = figure.layout.xaxis.range
@@ -5012,9 +4762,7 @@ def analysis(
     lines2 = {}
     values2 = []
     if not filtered_df2.empty and query2 is not None:
-        values2 = filtered_df2.iloc[-1][
-            ["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]
-        ].tolist()
+        values2 = filtered_df2.iloc[-1][["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]].tolist()
         ISA.append(filtered_df2.iloc[-1][["ISA"]].tolist()[0])
         # apply normalization if requested
         if normalize:
@@ -5037,11 +4785,7 @@ def analysis(
 
         top_flops2 = lines2["L1"]["ridge"][1]
         if trigger_id not in ["graphs", "interval-component"]:
-            figure.add_traces(
-                ut.plot_roofline(
-                    values2, lines2, "2", ISA[1], line_legend, int(line_size)
-                )
-            )
+            figure.add_traces(ut.plot_roofline(values2, lines2, "2", ISA[1], line_legend, int(line_size)))
     else:
         if lines2 != lines_origin2 and trigger_id != "interval-component":
             change_annotation = 1
@@ -5090,9 +4834,7 @@ def analysis(
 
 @app.callback(
     [
-        Output(
-            component_id="graphs", component_property="figure", allow_duplicate=True
-        ),
+        Output(component_id="graphs", component_property="figure", allow_duplicate=True),
         Output("change-annon", "data", allow_duplicate=True),
     ],
     [
@@ -5142,12 +4884,8 @@ def angle_updater(
 
         if size and len(size) >= 2:
             liner = size.split("\n")
-            width = float(
-                liner[0].replace("Plot area width:", "").replace("px", "").strip()
-            )
-            height = float(
-                liner[1].replace("Plot area height:", "").replace("px", "").strip()
-            )
+            width = float(liner[0].replace("Plot area width:", "").replace("px", "").strip())
+            height = float(liner[1].replace("Plot area height:", "").replace("px", "").strip())
 
             annotations = new_figure["layout"]["annotations"]
             cache_levels = ["L1", "L2", "L3", "DRAM"]
@@ -5191,20 +4929,12 @@ def angle_updater(
                         # Compute pixel coordinates based on log scale
                         x1_pixel = ((log_x1 - log_xmin) / (log_xmax - log_xmin)) * width
                         x2_pixel = ((log_x2 - log_xmin) / (log_xmax - log_xmin)) * width
-                        y1_pixel = (
-                            height
-                            - ((log_y1 - log_ymin) / (log_ymax - log_ymin)) * height
-                        )
-                        y2_pixel = (
-                            height
-                            - ((log_y2 - log_ymin) / (log_ymax - log_ymin)) * height
-                        )
+                        y1_pixel = height - ((log_y1 - log_ymin) / (log_ymax - log_ymin)) * height
+                        y2_pixel = height - ((log_y2 - log_ymin) / (log_ymax - log_ymin)) * height
 
                         # Pixel slope
                         pixel_slope = (y2_pixel - y1_pixel) / (x2_pixel - x1_pixel)
-                        ann["textangle"] = round(
-                            math.degrees(math.atan(pixel_slope)), 2
-                        )
+                        ann["textangle"] = round(math.degrees(math.atan(pixel_slope)), 2)
 
             for cache_level in ["L1", "L2", "L3", "DRAM", "FP", "FMA"]:
                 if not annotations or change_anon == 1:
@@ -5448,11 +5178,7 @@ def update_slider_marks2(current_values, lower_filter, duration_filter, mask_but
             return marks, max_index, initial_range
 
     # Update to only show the first and last marks within the selected range
-    if (
-        isinstance(current_values, list)
-        and len(current_values) == 2
-        and len(grouped_segments) > 1
-    ):
+    if isinstance(current_values, list) and len(current_values) == 2 and len(grouped_segments) > 1:
         filtered_marks = {
             current_values[0]: marks[current_values[0]],
             current_values[1]: marks[current_values[1]],
@@ -5565,8 +5291,7 @@ def update_slider_marks(
     if (
         triggered_id == "input-number"
         or current_values is None
-        or triggered_id
-        in ["lower-filter", "duration-filter", "time-slider", "button-paraver-mask"]
+        or triggered_id in ["lower-filter", "duration-filter", "time-slider", "button-paraver-mask"]
     ):
         if len(grouped_segments) < max_dots_auto:
             if max_index > 0:
@@ -5592,11 +5317,7 @@ def update_slider_marks(
             return marks, max_index, initial_range
 
     # Update to only show the first and last marks within the selected range
-    if (
-        isinstance(current_values, list)
-        and len(current_values) == 2
-        and len(grouped_segments) > 1
-    ):
+    if isinstance(current_values, list) and len(current_values) == 2 and len(grouped_segments) > 1:
         filtered_marks = {
             current_values[0]: marks[current_values[0]],
             current_values[1]: marks[current_values[1]],
