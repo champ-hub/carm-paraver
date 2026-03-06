@@ -18,6 +18,9 @@ This Graphical User Interface was developed to allow for the analysis of [Parave
 ## Setup
 The GUI is launched via the Paraver interface, the option to do so can be found by right clicking any Paraver timeline, and then expanding the "Run" dropdown were the CARM option can be selected. This will launch a window within Paraver where you can configure and launch the CARM GUI. These configurations can later be adjusted within the GUI as well.
 
+### Paraver Trace Requirements
+Avoid labeling regions **with MPI calls inside them**. Focus on labeling regions of pure computation, as MPI calls will prevent region and hardware counter timestamps from matching, which is required for the CARM analysis. 
+
 ### Python Dependencies
 The CARM GUI requires some Python packages to be installed, they can be installed using the requirements.txt file:
 
@@ -102,6 +105,8 @@ Useful options include:
 - **Filter points** by vector ISA or precision
 - **Color points** based on thread ID, precision, vector ISA or load/store ratio
     - Note that this requires the left sidebar option to be set to "Use CARM GUI Colors".
+
+The plot can be configured to normalize the performance roof to the number of threads. The normalized roofs represent the performance per thread, which matches the Paraver timestamps (also per thread). This mode is recommended when relating application performance to the underlying hardware. The non-normalized roofs represent the overall performance of the architecture, and is best for understanding the hardware capabilities.
 
 ### Note
 The CARM GUI can also be launched from outside a Paraver timeline, for this click the "Run Application" option (Gear Icon) in the top bar of Paraver.
