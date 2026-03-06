@@ -16,6 +16,7 @@ import errno
 # Run: pip install dash dash-bootstrap-components dash-daq numpy pandas plotly
 # To get all of the Libraries in case requirements.txt method fails
 import pandas as pd
+from pandas import DataFrame
 import plotly.graph_objects as go
 import dash
 import dash_bootstrap_components as dbc
@@ -360,14 +361,63 @@ if not ok:
     )
     sys.exit(1)
 
+
+def _write_temp_cfgs_with_timeunit(cfg_paths, time_unit_value):
+    """Write copies of cfg files to CWD with `window_units` set to `time_unit_value`.
+
+    Returns list of written file paths (in cwd). If a source file is missing it is skipped.
+    """
+    unit = (
+        time_unit_value
+        if time_unit_value and time_unit_value != "Unknown"
+        else "Microseconds"
+    )
+    written = []
+    for src in cfg_paths:
+        try:
+            with open(src, "r") as fh:
+                content = fh.read()
+        except Exception:
+            continue
+
+        if re.search(r"(?m)^window_units\s+\S+", content):
+            new_content = re.sub(
+                r"(?m)^window_units\s+\S+", f"window_units {unit}", content
+            )
+        else:
+            new_content = content + f"\nwindow_units {unit}\n"
+
+        dst = os.path.join(os.getcwd(), os.path.basename(src))
+        try:
+            with open(dst, "w") as fh:
+                fh.write(new_content)
+            written.append(dst)
+        except Exception:
+            # on failure, try to continue with other files
+            continue
+
+    return written
+
+
 if path.endswith(".prv") or path.endswith(".gz"):
     print(f"Executing Paramedir to parse the trace in {path}", flush=True)
-    subprocess.run(
-        ["paramedir", path, *intel_configs],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=True,
-    )
+    temp_cfgs = _write_temp_cfgs_with_timeunit(intel_configs, time_unit)
+    try:
+        subprocess.run(
+            ["paramedir", path, *temp_cfgs],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+    finally:
+        # best-effort cleanup of temp cfgs in cwd
+        for f in temp_cfgs:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except Exception:
+                pass
+
     print("Paramedir execution finished, calculating CARM metrics.", flush=True)
 
 # Get CARM results
@@ -382,7 +432,7 @@ else:
 # Extract machine names from filenames
 machine_names = [file.replace("_roofline.csv", "") for file in csv_files]
 
-merged_df = None
+counter_data_df = None
 missing_files = set()
 found_files = []
 sp_counters_available = False
@@ -400,12 +450,15 @@ for counter_name, value in intel_performance_counters.items():
             skiprows=1,
             names=["ThreadID", "Timestamp", "Duration", counter_name],
         )
-        if merged_df is None:
-            merged_df = df
+        if counter_data_df is None:
+            counter_data_df = df
         else:
             # Merge with the existing DataFrame on ThreadID, Timestamp, and Duration
-            merged_df = pd.merge(
-                merged_df, df, on=["ThreadID", "Timestamp", "Duration"], how="outer"
+            counter_data_df = pd.merge(
+                counter_data_df,
+                df,
+                on=["ThreadID", "Timestamp", "Duration"],
+                how="outer",
             )
         try:
             os.remove(filename)
@@ -418,13 +471,15 @@ for counter_name, value in intel_performance_counters.items():
     else:
         missing_files.add(filename[:-4])
         # If the file is missing, create a DataFrame with zeros for this counter
-        if merged_df is None:
-            merged_df = pd.DataFrame(
+        if counter_data_df is None:
+            counter_data_df = pd.DataFrame(
                 columns=["ThreadID", "Timestamp", "Duration", counter_name]
             )
-            merged_df[counter_name] = 0
+            counter_data_df[counter_name] = 0
         else:
-            merged_df[counter_name] = 0
+            counter_data_df[counter_name] = 0
+
+counter_data_df.sort_values(by="Timestamp", ascending=True)
 
 no_mem = False
 
@@ -484,27 +539,26 @@ missing_msg = (
 
 is_modal_open = len(missing_files) > 0
 
-ordered_df = merged_df.sort_values(by="Timestamp", ascending=True)
-biggest_timestamp = ordered_df["Timestamp"].max()
+assert isinstance(counter_data_df, DataFrame)
+biggest_timestamp = counter_data_df["Timestamp"].max()
 
-total_time = (biggest_timestamp - ordered_df["Timestamp"].min()) * scaling_unit
+total_time = (biggest_timestamp - counter_data_df["Timestamp"].min()) * scaling_unit
 
-total_threads = ordered_df["ThreadID"].nunique()
-unique_threadIDs = ordered_df["ThreadID"].unique().tolist()
+total_threads = counter_data_df["ThreadID"].nunique()
+unique_threadIDs = counter_data_df["ThreadID"].unique().tolist()
 unique_threadIDs_checkbox = [
     {"label": thread_id, "value": thread_id} for thread_id in unique_threadIDs
 ]
 
-
 filename_with_ext = os.path.basename(path)
 appname = os.path.splitext(filename_with_ext)[0]
 
-if ordered_df is not None:
+if counter_data_df is not None:
     # Calculate totals for each counter column
-    for column in ordered_df.columns:
+    for column in counter_data_df.columns:
         # Exclude non-counter columns
         if column not in ["ThreadID", "Timestamp", "Duration"]:
-            totals[column] = ordered_df[column].sum()
+            totals[column] = counter_data_df[column].sum()
 
     for counter, total in totals.items():
         # Check if the counter name contains "FP"
@@ -589,6 +643,8 @@ if color_csv_path != "":
 
     trace_df = trace_df.sort_values("LegendValue").reset_index(drop=True)
     legend_df = legend_df.sort_values("value_start").reset_index(drop=True)
+    assert isinstance(trace_df, DataFrame)
+    assert isinstance(legend_df, DataFrame)
 
     color_df = pd.merge_asof(
         trace_df,
@@ -611,6 +667,7 @@ if color_csv_path != "":
         (color_df["R"] > 0) | (color_df["G"] > 0) | (color_df["B"] > 0)
     ]
 
+assert isinstance(color_df, DataFrame)
 
 # Calculate metrics for each trace timestamp
 no_flops = 0
@@ -625,10 +682,10 @@ columns_to_check = [
     "Intel_FP_AVX512_SP",
     "Intel_FP_AVX512_DP",
 ]
-ordered_df = ordered_df.fillna(0)
-
+counter_data_df = counter_data_df.fillna(0)
+assert isinstance(counter_data_df, DataFrame)
 # Report progress during processing of rows
-total_rows = len(ordered_df)
+total_rows = len(counter_data_df)
 rows_chars = len(str(total_rows))
 step = max(1, total_rows // 20) if total_rows > 0 else 1
 processed = 0
@@ -642,7 +699,8 @@ else:
     print(
         f"Processing {total_rows} rows for CARM metrics...", flush=True
     )  # Initial message
-for index, row in ordered_df.iterrows():
+
+for index, row in counter_data_df.iterrows():
     if processed % step == 0 or processed == total_rows:
         # print a progress bar
         progress = processed / total_rows
@@ -822,7 +880,7 @@ app = dash.Dash(
     suppress_callback_exceptions=True,
 )
 
-# Sidebar Layour Definition
+# Sidebar Layout Definition
 sidebar = dbc.Offcanvas(
     html.Div(
         [
@@ -4842,7 +4900,9 @@ def analysis(
                 "font_size": tooltip_size,
             },
             title={
-                "text": "Cache Aware Roofline Model" + " (per thread)" if normalize else "",
+                "text": "Cache Aware Roofline Model" + " (per thread)"
+                if normalize
+                else "",
                 "y": 0.95,
                 "x": 0.5,
                 "xanchor": "center",
