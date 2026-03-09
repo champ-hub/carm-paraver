@@ -457,7 +457,7 @@ for counter_name in intel_performance_counters.keys():
         else:
             counter_data_df[counter_name] = 0
 
-counter_data_df.sort_values(by="Timestamp", ascending=True)
+counter_data_df.sort_values(by="Timestamp", ascending=True, inplace=True)
 
 no_mem = False
 
@@ -2009,7 +2009,6 @@ def update_slider_from_csv(
         try:
             csv_df = pd.read_csv(sync_csv_path)
             new_timestamps = [float(csv_df.iloc[0, 0]), float(csv_df.iloc[1, 0])]
-
         except Exception:
             first_load += 1
             raise PreventUpdate from None
@@ -2019,136 +2018,137 @@ def update_slider_from_csv(
             raise PreventUpdate
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
-        if new_timestamps != current_file_timestamps or trigger_id in ["button-paraver-sync"]:
-            first_load += 1
-            current_file_timestamps = new_timestamps
-            if first_load > 1:
-                try:
-                    start_index = (full_base_statistics_df["Timestamp"] - new_timestamps[0]).abs().idxmin()
-                    end_index = (full_base_statistics_df["Timestamp"] - new_timestamps[1]).abs().idxmin()
-                    if mask_button_offset != -1:
-                        if (mask_button + mask_button_offset) % 2 == 1:
-                            use_paraver_mask = False
-                        else:
-                            use_paraver_mask = True
-                    else:
-                        use_paraver_mask = False
+        if new_timestamps == current_file_timestamps and trigger_id != "button-paraver-sync":
+            raise PreventUpdate
 
-                    adjusted_start_index = ut.find_nearest_positive(
-                        full_base_statistics_df,
-                        start_index,
-                        float(lower_filter),
-                        float(duration_filter),
-                        use_paraver_mask,
-                        min_bound=0,
-                    )
-                    adjusted_end_index = ut.find_nearest_positive(
-                        full_base_statistics_df,
-                        end_index,
-                        float(lower_filter),
-                        float(duration_filter),
-                        use_paraver_mask,
-                        min_bound=adjusted_start_index,
-                    )
+        first_load += 1
+        current_file_timestamps = new_timestamps
 
-                    matching_start_timestamp = full_base_statistics_df.loc[adjusted_start_index, "Timestamp"]
-                    matching_end_timestamp = full_base_statistics_df.loc[adjusted_end_index, "Timestamp"]
+        if first_load <= 1:
+            raise PreventUpdate
 
-                    if use_paraver_mask:
-                        filtered_base = base_statistics_df[
-                            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-                            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-                            & (base_statistics_df["Duration"] >= float(duration_filter))
-                            & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
-                        ]
-                    else:
-                        filtered_base = base_statistics_df[
-                            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-                            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-                            & (base_statistics_df["Duration"] >= float(duration_filter))
-                        ]
-                    filtered_base = filtered_base.reset_index(drop=True)
-
-                    new_start_index = filtered_base[filtered_base["Timestamp"] == matching_start_timestamp].index[0]
-                    new_end_index = filtered_base[filtered_base["Timestamp"] == matching_end_timestamp].index[0]
-
-                except Exception as e:
-                    if no_sync:
-                        print("ERROR finding indices in main_df:", e, flush=True)
-                        print(
-                            'Check if the "Cut values lower than" option is not too high for the current region of interest',
-                            flush=True,
-                        )
-                        no_sync = False
-                    raise PreventUpdate from None
-
-                new_slider_indices = [int(new_start_index), int(new_end_index)]
-
-                if trigger_id == "button-paraver-sync":
-                    print("----------------------------------------------", flush=True)
-                    print(
-                        "Sync Button Clicked, updating slider to timestamp range {} - {}".format(
-                            filtered_base.loc[new_start_index, "Timestamp"],
-                            filtered_base.loc[new_end_index, "Timestamp"],
-                        )
-                    )
-
-                    if adjusted_start_index != start_index:
-                        print(
-                            "INFO: Adjusted Start Timestamp to {} from {} to allow for CARM plotting".format(
-                                filtered_base.loc[new_start_index, "Timestamp"],
-                                (full_base_statistics_df.loc[start_index, "Timestamp"]),
-                            ),
-                            flush=True,
-                        )
-
-                    if adjusted_end_index != end_index:
-                        print(
-                            "INFO: Adjusted End Timestamp to {} from {} to allow for CARM plotting".format(
-                                filtered_base.loc[new_end_index, "Timestamp"],
-                                (full_base_statistics_df.loc[end_index, "Timestamp"]),
-                            ),
-                            flush=True,
-                        )
-
-                    print("----------------------------------------------", flush=True)
-                    no_sync = True
-                    return new_slider_indices, new_slider_indices, new_timestamps
-
-                if new_slider_indices != current_values:
-                    print("----------------------------------------------", flush=True)
-                    print(
-                        "Sync CSV values changed, updating slider to timestamp range {} - {}".format(
-                            filtered_base.loc[new_start_index, "Timestamp"],
-                            filtered_base.loc[new_end_index, "Timestamp"],
-                        )
-                    )
-
-                    if adjusted_start_index != start_index:
-                        print(
-                            "INFO: Adjusted Start Timestamp to {} from {} to allow for CARM plotting".format(
-                                filtered_base.loc[new_start_index, "Timestamp"],
-                                (full_base_statistics_df.loc[start_index, "Timestamp"]),
-                            ),
-                            flush=True,
-                        )
-
-                    if adjusted_end_index != end_index:
-                        print(
-                            "INFO: Adjusted End Timestamp to {} from {} to allow for CARM plotting".format(
-                                filtered_base.loc[new_end_index, "Timestamp"],
-                                (full_base_statistics_df.loc[end_index, "Timestamp"]),
-                            ),
-                            flush=True,
-                        )
-
-                    print("----------------------------------------------", flush=True)
-                    no_sync = True
-                    return new_slider_indices, new_slider_indices, new_timestamps
+        try:
+            start_index = (full_base_statistics_df["Timestamp"] - new_timestamps[0]).abs().idxmin()
+            end_index = (full_base_statistics_df["Timestamp"] - new_timestamps[1]).abs().idxmin()
+            if mask_button_offset != -1:
+                if (mask_button + mask_button_offset) % 2 == 1:
+                    use_paraver_mask = False
+                else:
+                    use_paraver_mask = True
             else:
-                raise dash.exceptions.PreventUpdate
-        else:
-            raise dash.exceptions.PreventUpdate
+                use_paraver_mask = False
+
+            adjusted_start_index = ut.find_nearest_positive(
+                full_base_statistics_df,
+                start_index,
+                float(lower_filter),
+                float(duration_filter),
+                use_paraver_mask,
+                min_bound=0,
+            )
+            adjusted_end_index = ut.find_nearest_positive(
+                full_base_statistics_df,
+                end_index,
+                float(lower_filter),
+                float(duration_filter),
+                use_paraver_mask,
+                min_bound=adjusted_start_index,
+            )
+
+            matching_start_timestamp = full_base_statistics_df.loc[adjusted_start_index, "Timestamp"]
+            matching_end_timestamp = full_base_statistics_df.loc[adjusted_end_index, "Timestamp"]
+
+            if use_paraver_mask:
+                filtered_base = base_statistics_df[
+                    (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
+                    & (base_statistics_df["GFLOPS"] >= float(lower_filter))
+                    & (base_statistics_df["Duration"] >= float(duration_filter))
+                    & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
+                ]
+            else:
+                filtered_base = base_statistics_df[
+                    (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
+                    & (base_statistics_df["GFLOPS"] >= float(lower_filter))
+                    & (base_statistics_df["Duration"] >= float(duration_filter))
+                ]
+            filtered_base = filtered_base.reset_index(drop=True)
+
+            new_start_index = filtered_base[filtered_base["Timestamp"] == matching_start_timestamp].index[0]
+            new_end_index = filtered_base[filtered_base["Timestamp"] == matching_end_timestamp].index[0]
+
+        except Exception as e:
+            if no_sync:
+                print("ERROR finding indices in main_df:", e, flush=True)
+                print(
+                    'Check if the "Cut values lower than" option is not too high for the current region of interest',
+                    flush=True,
+                )
+                no_sync = False
+            raise PreventUpdate from None
+
+        new_slider_indices = [int(new_start_index), int(new_end_index)]
+
+        if trigger_id == "button-paraver-sync":
+            print("----------------------------------------------", flush=True)
+            print(
+                "Sync Button Clicked, updating slider to timestamp range {} - {}".format(
+                    filtered_base.loc[new_start_index, "Timestamp"],
+                    filtered_base.loc[new_end_index, "Timestamp"],
+                )
+            )
+
+            if adjusted_start_index != start_index:
+                print(
+                    "INFO: Adjusted Start Timestamp to {} from {} to allow for CARM plotting".format(
+                        filtered_base.loc[new_start_index, "Timestamp"],
+                        (full_base_statistics_df.loc[start_index, "Timestamp"]),
+                    ),
+                    flush=True,
+                )
+
+            if adjusted_end_index != end_index:
+                print(
+                    "INFO: Adjusted End Timestamp to {} from {} to allow for CARM plotting".format(
+                        filtered_base.loc[new_end_index, "Timestamp"],
+                        (full_base_statistics_df.loc[end_index, "Timestamp"]),
+                    ),
+                    flush=True,
+                )
+
+            print("----------------------------------------------", flush=True)
+            no_sync = True
+            return new_slider_indices, new_slider_indices, new_timestamps
+
+        if new_slider_indices != current_values:
+            print("----------------------------------------------", flush=True)
+            print(
+                "Sync CSV values changed, updating slider to timestamp range {} - {}".format(
+                    filtered_base.loc[new_start_index, "Timestamp"],
+                    filtered_base.loc[new_end_index, "Timestamp"],
+                )
+            )
+
+            if adjusted_start_index != start_index:
+                print(
+                    "INFO: Adjusted Start Timestamp to {} from {} to allow for CARM plotting".format(
+                        filtered_base.loc[new_start_index, "Timestamp"],
+                        (full_base_statistics_df.loc[start_index, "Timestamp"]),
+                    ),
+                    flush=True,
+                )
+
+            if adjusted_end_index != end_index:
+                print(
+                    "INFO: Adjusted End Timestamp to {} from {} to allow for CARM plotting".format(
+                        filtered_base.loc[new_end_index, "Timestamp"],
+                        (full_base_statistics_df.loc[end_index, "Timestamp"]),
+                    ),
+                    flush=True,
+                )
+
+            print("----------------------------------------------", flush=True)
+            no_sync = True
+            return new_slider_indices, new_slider_indices, new_timestamps
 
 
 @app.callback(
@@ -4014,7 +4014,7 @@ def analysis(
     Threads_timestamp,
     color_radio,
     plot_total,
-    exponant,
+    exponent,
     line_legend,
     normalize,
     lower_filter,
@@ -4775,7 +4775,7 @@ def analysis(
             annotations = {}
         lines_origin2 = lines2
 
-    if exponant:
+    if exponent:
         xaxis_range = figure.layout.xaxis.range
         x_min = min(0.00390625, smallest_ai / 5)
         x_max = 256
@@ -5382,6 +5382,25 @@ if __name__ == "__main__":
     # cause issues in some distributions.
     host = "127.0.0.1"
     print(f"Starting Dash app on {host}:{SELECTED_PORT}")
+
+    from werkzeug.middleware.profiler import ProfilerMiddleware
+
+    # Enable profiling when either PROFILE env var is set.
+    # Use `profile_dir` so ProfilerMiddleware writes per-request .prof files
+    # instead of printing results for every request
+    profiler_env = os.getenv("PROFILE")
+    if profiler_env:
+        profile_dir = "profiles"
+        try:
+            os.makedirs(profile_dir, exist_ok=True)
+        except Exception:
+            pass
+        app.server.wsgi_app = ProfilerMiddleware(
+            app.server.wsgi_app,
+            profile_dir=profile_dir,
+            sort_by=("cumtime",),
+            restrictions=[50],
+        )
 
     # use run_server for Dash apps (wrapper around Flask.run)
     app.run_server(debug=False, port=SELECTED_PORT, host=host)
