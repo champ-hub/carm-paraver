@@ -654,7 +654,7 @@ assert isinstance(counter_data_df, DataFrame)
 # Report progress during processing of rows
 total_rows = len(counter_data_df)
 rows_chars = len(str(total_rows))
-step = max(1, total_rows // 20) if total_rows > 0 else 1
+step = max(1, total_rows // 100) if total_rows > 0 else 1
 processed = 0
 if total_rows > 50_000:
     print(
@@ -683,13 +683,14 @@ else:
 del color_df
 
 for row in counter_data_df.itertuples(index=False):
+    # Print progress bar N times and at the end of processing
     if processed % step == 0 or processed == total_rows:
         # print a progress bar
         progress = processed / total_rows
-        bar_width = 20  # Total width of the progress bar
+        bar_width = 30  # Total width of the progress bar
         segments = math.ceil(bar_width * progress)
         print(
-            f"[{'=' * segments}{'-' * (bar_width - segments)}] {progress * 100:.0f}%",
+            f"[{'#' * segments}{' ' * (bar_width - segments)}] {progress * 100:.1f}%",
             end="\r",
             flush=True,
         )
@@ -833,9 +834,6 @@ for row in counter_data_df.itertuples(index=False):
 
 del counter_data_df
 
-# finish progress line
-if total_rows > 0:
-    print()
 
 _runtime = time.time() - _time_start
 print(f"Finished processing {total_rows} rows in {_runtime:.2f} seconds. ")
