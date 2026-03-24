@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+from typing import Any
 
 import dash
 import dash_bootstrap_components as dbc
@@ -28,6 +29,29 @@ from pandas import DataFrame
 
 # Local Python Scripts
 import GUI_utils as ut
+from analysis_helpers import (
+    TimestampColorContext,
+    build_timestamp_scatter_trace,
+    build_timestamp_tooltip_args,
+    calculate_roofline_profile,
+    fallback_roofline_df_by_isa,
+    filter_base_and_intel_data,
+    filter_roofline_df_by_query,
+    get_timestamp_point,
+    infer_effective_isa_from_timestamp_columns,
+    iter_timestamp_points,
+    prepare_timestamp_series,
+    resolve_analysis_paraver_toggles,
+    resolve_interval_point_index_and_legend,
+    resolve_roofline_angle_bounds,
+    resolve_roofline_x_bounds,
+    resolve_timestamp_legend_state,
+    resolve_timestamp_slice_bounds,
+    resolve_toggle_enabled,
+    select_timestamp_color,
+    should_plot_timestamp_point,
+    should_reset_annotations_for_lines,
+)
 
 VERSION = "1.0.0"
 
@@ -543,6 +567,7 @@ if counter_data_df is not None:
 else:
     print("No data to calculate totals.")
 
+# TODO: This works globally, but should probably be done per-timestamp for best accuracy
 # Calculate approximate size of memory instructions based on the FP instructions present
 bytes_modifier = (
     4 * (totals["Intel_FP_Scalar_SP"] / total_FP_inst)
@@ -655,6 +680,7 @@ assert isinstance(counter_data_df, DataFrame)
 total_rows = len(counter_data_df)
 rows_chars = len(str(total_rows))
 step = max(1, total_rows // 100) if total_rows > 0 else 1
+prog_bar_width = 30  # Total width of the progress bar
 processed = 0
 if total_rows > 50_000:
     print(
@@ -687,10 +713,9 @@ for row in counter_data_df.itertuples(index=False):
     if processed % step == 0 or processed == total_rows:
         # print a progress bar
         progress = processed / total_rows
-        bar_width = 30  # Total width of the progress bar
-        segments = math.ceil(bar_width * progress)
+        segments = math.ceil(prog_bar_width * progress)
         print(
-            f"[{'#' * segments}{' ' * (bar_width - segments)}] {progress * 100:.1f}%",
+            f"[{'#' * segments}{' ' * (prog_bar_width - segments)}] {progress * 100:.1f}%",
             end="\r",
             flush=True,
         )
@@ -834,6 +859,14 @@ for row in counter_data_df.itertuples(index=False):
 
 del counter_data_df
 
+# Finish progress bar
+if total_rows > 0:
+    print(
+        f"[{'#' * prog_bar_width}] {100:.1f}%",
+        end="\r",
+        flush=True,
+    )
+    print()
 
 _runtime = time.time() - _time_start
 print(f"Finished processing {total_rows} rows in {_runtime:.2f} seconds. ")
@@ -2028,13 +2061,7 @@ def update_slider_from_csv(
         try:
             start_index = (full_base_statistics_df["Timestamp"] - new_timestamps[0]).abs().idxmin()
             end_index = (full_base_statistics_df["Timestamp"] - new_timestamps[1]).abs().idxmin()
-            if mask_button_offset != -1:
-                if (mask_button + mask_button_offset) % 2 == 1:
-                    use_paraver_mask = False
-                else:
-                    use_paraver_mask = True
-            else:
-                use_paraver_mask = False
+            use_paraver_mask = resolve_toggle_enabled(mask_button, mask_button_offset)
 
             adjusted_start_index = ut.find_nearest_positive(
                 full_base_statistics_df,
@@ -2056,20 +2083,14 @@ def update_slider_from_csv(
             matching_start_timestamp = full_base_statistics_df.loc[adjusted_start_index, "Timestamp"]
             matching_end_timestamp = full_base_statistics_df.loc[adjusted_end_index, "Timestamp"]
 
-            if use_paraver_mask:
-                filtered_base = base_statistics_df[
-                    (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-                    & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-                    & (base_statistics_df["Duration"] >= float(duration_filter))
-                    & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
-                ]
-            else:
-                filtered_base = base_statistics_df[
-                    (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-                    & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-                    & (base_statistics_df["Duration"] >= float(duration_filter))
-                ]
-            filtered_base = filtered_base.reset_index(drop=True)
+            filtered_base, _ = filter_base_and_intel_data(
+                base_statistics_df,
+                intel_statistics_df2,
+                lower_filter,
+                duration_filter,
+                use_paraver_mask,
+                ut.is_valid_paraver_value,
+            )
 
             new_start_index = filtered_base[filtered_base["Timestamp"] == matching_start_timestamp].index[0]
             new_end_index = filtered_base[filtered_base["Timestamp"] == matching_end_timestamp].index[0]
@@ -2480,6 +2501,98 @@ def toggle_annotations(n_clicks, button_text, current_fig):
     return current_fig, button_text
 
 
+def build_annotation_card(index, annotation):
+    return dbc.Card(
+        [
+            dbc.CardHeader(
+                f"{annotation.get('text')}",
+                style={
+                    "color": "white",
+                    "fontWeight": "bold",
+                    "margin": "0px",
+                    "padding": "2px 0px 0px 2px",
+                },
+            ),
+            dbc.CardBody(
+                [
+                    dbc.Row(
+                        [
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.Div(
+                                                "Plot:",
+                                                style={
+                                                    "color": "white",
+                                                    "marginRight": "10px",
+                                                    "alignSelf": "center",
+                                                },
+                                            ),
+                                            dbc.Checkbox(
+                                                id={"type": "annotation-enable", "index": index},
+                                                className="mb-0",
+                                                style={"alignSelf": "center"},
+                                                value=annotation.get("opacity", 1) == 1,
+                                            ),
+                                        ],
+                                        style={"display": "flex", "alignItems": "center"},
+                                    ),
+                                    html.Div(
+                                        [
+                                            html.Div(
+                                                "Angle:",
+                                                style={
+                                                    "color": "white",
+                                                    "marginRight": "10px",
+                                                    "marginLeft": "30px",
+                                                    "alignSelf": "center",
+                                                },
+                                            ),
+                                            dbc.Input(
+                                                type="number",
+                                                placeholder="Angle",
+                                                value=round(annotation.get("textangle", 0)),
+                                                id={"type": "angle-input", "index": index},
+                                                style={"width": "80px", "height": "25px"},
+                                            ),
+                                        ],
+                                        style={
+                                            "display": "flex",
+                                            "alignItems": "center",
+                                            "marginRight": "30px",
+                                        },
+                                    ),
+                                ],
+                                style={
+                                    "display": "flex",
+                                    "alignItems": "center",
+                                    "justifyContent": "flex-start",
+                                },
+                            ),
+                        ],
+                        className="mb-0",
+                        align="center",
+                    ),
+                ],
+                style={"margin": "0px", "padding": "0px 0px 2px 2px"},
+            ),
+        ],
+        className="mb-1",
+        style={
+            "margin": "0px",
+            "padding": "0px 0px 2px 2px",
+            "backgroundColor": "#6c757d",
+            "Color": annotation.get("bordercolor"),
+        },
+    )
+
+
+def _build_annotation_accordion_item(title, item_id, indexed_annotations):
+    cards = [build_annotation_card(index, annotation) for index, annotation in indexed_annotations]
+    return dbc.AccordionItem(title=title, children=cards, item_id=item_id)
+
+
 @app.callback(
     Output("annotation-accordion", "children"),
     Input("graphs", "figure"),
@@ -2507,221 +2620,14 @@ def generate_angle_inputs(graph):
         if not matched:
             ungrouped_annotations.append((i, ann))
 
-    for suffix, anns in grouped_annotations.items():
-        if not anns:
-            continue
-
-        cards = []
-        for i, ann in anns:
-            card = dbc.Card(
-                [
-                    dbc.CardHeader(
-                        f"{ann.get('text')}",
-                        style={
-                            "color": "white",
-                            "fontWeight": "bold",
-                            "margin": "0px",
-                            "padding": "2px 0px 0px 2px",
-                        },
-                    ),
-                    dbc.CardBody(
-                        [
-                            dbc.Row(
-                                [
-                                    html.Div(
-                                        [
-                                            html.Div(
-                                                [
-                                                    html.Div(
-                                                        "Plot:",
-                                                        style={
-                                                            "color": "white",
-                                                            "marginRight": "10px",
-                                                            "alignSelf": "center",
-                                                        },
-                                                    ),
-                                                    dbc.Checkbox(
-                                                        id={
-                                                            "type": "annotation-enable",
-                                                            "index": i,
-                                                        },
-                                                        className="mb-0",
-                                                        style={"alignSelf": "center"},
-                                                        value=ann.get("opacity", 1) == 1,
-                                                    ),
-                                                ],
-                                                style={
-                                                    "display": "flex",
-                                                    "alignItems": "center",
-                                                },
-                                            ),
-                                            html.Div(
-                                                [
-                                                    html.Div(
-                                                        "Angle:",
-                                                        style={
-                                                            "color": "white",
-                                                            "marginRight": "10px",
-                                                            "marginLeft": "30px",
-                                                            "alignSelf": "center",
-                                                        },
-                                                    ),
-                                                    dbc.Input(
-                                                        type="number",
-                                                        placeholder="Angle",
-                                                        value=round(ann.get("textangle", 0)),
-                                                        id={
-                                                            "type": "angle-input",
-                                                            "index": i,
-                                                        },
-                                                        style={
-                                                            "width": "80px",
-                                                            "height": "25px",
-                                                        },
-                                                    ),
-                                                ],
-                                                style={
-                                                    "display": "flex",
-                                                    "alignItems": "center",
-                                                    "marginRight": "30px",
-                                                },
-                                            ),
-                                        ],
-                                        style={
-                                            "display": "flex",
-                                            "alignItems": "center",
-                                            "justifyContent": "flex-start",
-                                        },
-                                    ),
-                                ],
-                                className="mb-0",
-                                align="center",
-                            ),
-                        ],
-                        style={"margin": "0px", "padding": "0px 0px 2px 2px"},
-                    ),
-                ],
-                className="mb-1",
-                style={
-                    "margin": "0px",
-                    "padding": "0px 0px 2px 2px",
-                    "backgroundColor": "#6c757d",
-                    "Color": ann.get("bordercolor"),
-                },
-            )
-            cards.append(card)
-
-        group_title = f"CARM Results {suffix[-1]}"
-        accordion_item = dbc.AccordionItem(
-            title=group_title,
-            children=cards,
-            item_id=f"group_{suffix}",
-        )
-        accordion_items.append(accordion_item)
-
+    grouped_sections = [
+        (f"CARM Results {suffix[-1]}", f"group_{suffix}", anns) for suffix, anns in grouped_annotations.items() if anns
+    ]
     if ungrouped_annotations:
-        cards = []
-        for i, ann in ungrouped_annotations:
-            card = dbc.Card(
-                [
-                    dbc.CardHeader(
-                        f"{ann.get('text')}",
-                        style={
-                            "color": "white",
-                            "fontWeight": "bold",
-                            "margin": "0px",
-                            "padding": "2px 0px 0px 2px",
-                        },
-                    ),
-                    dbc.CardBody(
-                        [
-                            dbc.Row(
-                                [
-                                    html.Div(
-                                        [
-                                            html.Div(
-                                                [
-                                                    html.Div(
-                                                        "Plot:",
-                                                        style={
-                                                            "color": "white",
-                                                            "marginRight": "10px",
-                                                            "alignSelf": "center",
-                                                        },
-                                                    ),
-                                                    dbc.Checkbox(
-                                                        id={
-                                                            "type": "annotation-enable",
-                                                            "index": i,
-                                                        },
-                                                        className="mb-0",
-                                                        style={"alignSelf": "center"},
-                                                        value=ann.get("opacity", 1) == 1,
-                                                    ),
-                                                ],
-                                                style={
-                                                    "display": "flex",
-                                                    "alignItems": "center",
-                                                },
-                                            ),
-                                            html.Div(
-                                                [
-                                                    html.Div(
-                                                        "Angle:",
-                                                        style={
-                                                            "color": "white",
-                                                            "marginRight": "10px",
-                                                            "marginLeft": "30px",
-                                                            "alignSelf": "center",
-                                                        },
-                                                    ),
-                                                    dbc.Input(
-                                                        type="number",
-                                                        placeholder="Angle",
-                                                        value=round(ann.get("textangle", 0)),
-                                                        id={
-                                                            "type": "angle-input",
-                                                            "index": i,
-                                                        },
-                                                        style={
-                                                            "width": "80px",
-                                                            "height": "25px",
-                                                        },
-                                                    ),
-                                                ],
-                                                style={
-                                                    "display": "flex",
-                                                    "alignItems": "center",
-                                                    "marginRight": "30px",
-                                                },
-                                            ),
-                                        ],
-                                        style={
-                                            "display": "flex",
-                                            "alignItems": "center",
-                                            "justifyContent": "flex-start",
-                                        },
-                                    ),
-                                ],
-                                className="mb-0",
-                                align="center",
-                            ),
-                        ],
-                        style={"margin": "0px", "padding": "0px 0px 2px 2px"},
-                    ),
-                ],
-                className="mb-1",
-                style={
-                    "margin": "0px",
-                    "padding": "0px 0px 2px 2px",
-                    "backgroundColor": "#6c757d",
-                    "Color": ann.get("bordercolor"),
-                },
-            )
-            cards.append(card)
+        grouped_sections.append(("Custom Annotations", "other_annotations", ungrouped_annotations))
 
-        accordion_item = dbc.AccordionItem(title="Custom Annotations", children=cards, item_id="other_annotations")
-        accordion_items.append(accordion_item)
+    for title, item_id, indexed_annotations in grouped_sections:
+        accordion_items.append(_build_annotation_accordion_item(title, item_id, indexed_annotations))
 
     return accordion_items
 
@@ -2849,145 +2755,76 @@ def toggle_editable(n_clicks, figure, config):
 @app.callback(Output("additional-dropdowns", "children"), [Input("filename", "value")])
 def update_additional_dropdowns(selected_file):
     # Update the CARM results filter dropdowns
-    if selected_file:
-        _, _, _, _, data_list = ut.read_csv_file(selected_file)
-        df = pd.DataFrame(data_list)
-
-    fields = [
-        "ISA",
-        "Precision",
-        "Threads",
-        "Loads",
-        "Stores",
-        "Interleaved",
-        "DRAM Bytes",
-        "FP Inst",
-        "Date",
-    ]
-    dropdowns = []
-
-    for field in fields:
-        if selected_file:
-            if not df.empty:
-                if field == "Date":
-                    unique_values = sorted(df[field.replace(" ", "")].unique(), reverse=True)
-                else:
-                    unique_values = sorted(df[field.replace(" ", "")].unique())
-                options = [{"label": value, "value": value} for value in unique_values]
-            else:
-                options = {}
-        else:
-            options = {}
-
-        if field == "Date":
-            width = 250
-        elif field == "ISA":
-            width = 200
-        else:
-            width = 160
-
-        dropdowns.append(
-            html.Div(
-                dcc.Dropdown(
-                    id=f"{field.lower().replace(' ', '')}-dynamic-dropdown",
-                    placeholder=field,
-                    options=options,
-                    multi=False,
-                ),
-                style={
-                    "flex": "1 0 auto",
-                    "minWidth": width,
-                    "margin": "5px",
-                },
-            )
-        )
-
-    return dbc.Card(
-        dbc.CardBody(
-            [
-                html.Div(
-                    [
-                        html.Div(
-                            "CARM Results 1:",
-                            style={
-                                "marginRight": "10px",
-                                "alignSelf": "center",
-                                "fontWeight": "bold",
-                                "minWidth": "125px",
-                            },
-                        ),
-                        html.Div(
-                            dropdowns,
-                            style={
-                                "display": "flex",
-                                "width": "100%",
-                                "justifyContent": "space-between",
-                                "alignItems": "center",
-                            },
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "margin": "-10px auto auto auto",
-                    },
-                )
-            ]
-        ),
-        style={
-            "margin": "0px auto 10px auto",
-            "padding": "0px",
-            "textAlign": "center",
-            "display": "flex",
-            "height": "60px",
-        },
-    )
+    return _build_additional_dropdowns_card(selected_file, "row1")
 
 
 @app.callback(Output("additional-dropdowns2", "children"), [Input("filename", "value")])
 def update_additional_dropdowns2(selected_file):
     # Update the CARM results filter dropdowns (line2)
-    if selected_file:
-        _, _, _, _, data_list = ut.read_csv_file(selected_file)
-        df = pd.DataFrame(data_list)
+    return _build_additional_dropdowns_card(selected_file, "row2")
 
-    fields = [
-        "ISA",
-        "Precision",
-        "Threads",
-        "Loads",
-        "Stores",
-        "Interleaved",
-        "DRAM Bytes",
-        "FP Inst",
-        "Date",
-    ]
+
+ADDITIONAL_DROPDOWN_FIELDS = [
+    "ISA",
+    "Precision",
+    "Threads",
+    "Loads",
+    "Stores",
+    "Interleaved",
+    "DRAM Bytes",
+    "FP Inst",
+    "Date",
+]
+
+ADDITIONAL_DROPDOWN_WIDTHS = {
+    "Date": 250,
+    "ISA": 200,
+}
+
+ADDITIONAL_DROPDOWN_ROWS = {
+    "row1": {
+        "suffix": "",
+        "label": "CARM Results 1:",
+        "label_style": {
+            "marginRight": "10px",
+            "alignSelf": "center",
+            "fontWeight": "bold",
+            "minWidth": "125px",
+        },
+    },
+    "row2": {
+        "suffix": "2",
+        "label": "CARM Results 2:",
+        "label_style": {
+            "marginRight": "10px",
+            "alignSelf": "center",
+            "fontWeight": "bold",
+            "color": "red",
+            "minWidth": "125px",
+        },
+    },
+}
+
+
+def _build_additional_dropdown_options(df: pd.DataFrame | None, field: str):
+    if df is None or df.empty:
+        return {}
+
+    sort_desc = field == "Date"
+    unique_values = sorted(df[field.replace(" ", "")].unique(), reverse=sort_desc)
+    return [{"label": value, "value": value} for value in unique_values]
+
+
+def _build_additional_dropdowns_list(df: pd.DataFrame | None, suffix: str):
     dropdowns = []
 
-    for field in fields:
-        if selected_file:
-            if not df.empty:
-                if field == "Date":
-                    unique_values = sorted(df[field.replace(" ", "")].unique(), reverse=True)
-                else:
-                    unique_values = sorted(df[field.replace(" ", "")].unique())
-                options = [{"label": value, "value": value} for value in unique_values]
-            else:
-                options = {}
-        else:
-            options = {}
-
-        if field == "Date":
-            width = 250
-        elif field == "ISA":
-            width = 200
-        else:
-            width = 160
-
+    for field in ADDITIONAL_DROPDOWN_FIELDS:
+        options = _build_additional_dropdown_options(df, field)
+        width = ADDITIONAL_DROPDOWN_WIDTHS.get(field, 160)
         dropdowns.append(
             html.Div(
                 dcc.Dropdown(
-                    id=f"{field.lower().replace(' ', '')}-dynamic-dropdown2",
+                    id=f"{field.lower().replace(' ', '')}-dynamic-dropdown{suffix}",
                     placeholder=field,
                     options=options,
                     multi=False,
@@ -3000,20 +2837,26 @@ def update_additional_dropdowns2(selected_file):
             )
         )
 
+    return dropdowns
+
+
+def _build_additional_dropdowns_card(selected_file, row_key: str):
+    row_cfg = ADDITIONAL_DROPDOWN_ROWS[row_key]
+    df = None
+    if selected_file:
+        _, _, _, _, data_list = ut.read_csv_file(selected_file)
+        df = pd.DataFrame(data_list)
+
+    dropdowns = _build_additional_dropdowns_list(df, row_cfg["suffix"])
+
     return dbc.Card(
         dbc.CardBody(
             [
                 html.Div(
                     [
                         html.Div(
-                            "CARM Results 2:",
-                            style={
-                                "marginRight": "10px",
-                                "alignSelf": "center",
-                                "fontWeight": "bold",
-                                "color": "red",
-                                "minWidth": "125px",
-                            },
+                            row_cfg["label"],
+                            style=row_cfg["label_style"],
                         ),
                         html.Div(
                             dropdowns,
@@ -3043,878 +2886,124 @@ def update_additional_dropdowns2(selected_file):
     )
 
 
-@app.callback(
-    Output("isa-dynamic-dropdown", "options"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_ISA(
-    Precision,
-    Threads,
-    Loads,
-    Stores,
-    Interleaved,
-    DRAMBytes,
-    FPInst,
-    Date,
-    selected_file,
-):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["ISA"].unique())]
+ROOFLINE_FILTER_FIELD_ID_STEMS = {
+    "ISA": "isa",
+    "Precision": "precision",
+    "Threads": "threads",
+    "Loads": "loads",
+    "Stores": "stores",
+    "Interleaved": "interleaved",
+    "DRAMBytes": "drambytes",
+    "FPInst": "fpinst",
+    "Date": "date",
+}
+ROOFLINE_SORT_DESC_FIELDS = {"Date"}
 
 
-@app.callback(
-    Output("precision-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Precision(ISA, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
+def _roofline_filter_dropdown_id(field_name: str, suffix: str = "") -> str:
+    return f"{ROOFLINE_FILTER_FIELD_ID_STEMS[field_name]}-dynamic-dropdown{suffix}"
+
+
+def _build_roofline_filter_input_group(suffix: str = "") -> dict[str, Input]:
+    return {
+        field_name: Input(_roofline_filter_dropdown_id(field_name, suffix), "value")
+        for field_name in ROOFLINE_FILTER_FIELD_ID_STEMS
+    }
+
+
+ANALYSIS_CONTROL_INPUTS = {
+    "timestamps_range": Input("value-slider", "value"),
+    "timestamps_max_range": Input("time-slider", "value"),
+    "timestamps_grouper": Input("input-number", "value"),
+    "average": Input("average-checkbox", "value"),
+    "n_clicks": Input("play-pause-button", "n_clicks"),
+    "n_intervals": Input("interval-component", "n_intervals"),
+    "ISA_timestamp": Input("isa-checklist", "value"),
+    "Precision_timestamp": Input("precision-checklist", "value"),
+    "Threads_timestamp": Input("thread-checklist", "value"),
+    "color_radio": Input("color-radio", "value"),
+    "plot_total": Input("total-checklist", "value"),
+    "exponent": Input("exponent-switch", "value"),
+    "line_legend": Input("line-legend-switch", "value"),
+    "normalize": Input("normalize-switch", "value"),
+    "lower_filter": Input("lower-filter", "value"),
+    "duration_filter": Input("duration-filter", "value"),
+    "line_size": Input("line-size", "value"),
+    "title_size": Input("title-size", "value"),
+    "axis_size": Input("axis-size", "value"),
+    "tick_size": Input("tick-size", "value"),
+    "tooltip_size": Input("tooltip-size", "value"),
+    "legend_size": Input("legend-size", "value"),
+    "dot_size": Input("dot-size", "value"),
+    "mask_button": Input("button-paraver-mask", "n_clicks"),
+    "accum_button": Input("button-paraver-accumulate", "n_clicks"),
+    "paraver_color_button": Input("button-paraver-colors", "n_clicks"),
+}
+ANALYSIS_CALLBACK_INPUTS = {
+    "filters_primary": _build_roofline_filter_input_group(),
+    "filters_secondary": _build_roofline_filter_input_group("2"),
+    "selected_file": Input("filename", "value"),
+    "controls": ANALYSIS_CONTROL_INPUTS,
+}
+
+
+def _compute_filtered_dropdown_options(
+    target_field: str, selected_filters: dict[str, Any], selected_file: str | None
+) -> list[dict[str, Any]]:
     if not selected_file:
         return []
 
-    # Read the CSV file and extract data
     _, _, _, _, data_list = ut.read_csv_file(selected_file)
     df = pd.DataFrame(data_list)
     if df.empty:
         return []
 
     query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
+    query_locals = {}
+    for field_name, value in selected_filters.items():
+        if not value:
+            continue
+        local_name = f"selected_{field_name.lower()}"
+        query_conditions.append(f"{field_name} == @{local_name}")
+        query_locals[local_name] = value
 
     if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
+        df = df.query(" and ".join(query_conditions), local_dict=query_locals)
 
-    return [{"label": precision, "value": precision} for precision in sorted(df["Precision"].unique())]
+    values = sorted(df[target_field].dropna().unique(), reverse=target_field in ROOFLINE_SORT_DESC_FIELDS)
+    return [{"label": value, "value": value} for value in values]
 
 
-@app.callback(
-    Output("threads-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Threads(ISA, Precision, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
+def _make_chained_dropdown_callback(target_field: str, suffix: str):
+    source_fields = [field_name for field_name in ROOFLINE_FILTER_FIELD_ID_STEMS if field_name != target_field]
 
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
+    def callback(*callback_values):
+        *selected_values, selected_file = callback_values
+        selected_filters = dict(zip(source_fields, selected_values, strict=False))
+        return _compute_filtered_dropdown_options(target_field, selected_filters, selected_file)
 
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
+    callback.__name__ = f"chained_callback_{target_field}{suffix}"
+    return callback
 
-    return [{"label": precision, "value": precision} for precision in sorted(df["Threads"].unique())]
 
+def _register_chained_dropdown_callbacks():
+    for suffix in ("", "2"):
+        for target_field in ROOFLINE_FILTER_FIELD_ID_STEMS:
+            input_list = [
+                Input(_roofline_filter_dropdown_id(field_name, suffix), "value")
+                for field_name in ROOFLINE_FILTER_FIELD_ID_STEMS
+                if field_name != target_field
+            ]
+            input_list.append(Input("filename", "value"))
 
-@app.callback(
-    Output("loads-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Loads(ISA, Precision, Threads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
+            app.callback(
+                Output(_roofline_filter_dropdown_id(target_field, suffix), "options"),
+                *input_list,
+                prevent_initial_call=True,
+            )(_make_chained_dropdown_callback(target_field, suffix))
 
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
 
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Loads"].unique())]
-
-
-@app.callback(
-    Output("stores-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Stores(ISA, Precision, Threads, Loads, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Stores"].unique())]
-
-
-@app.callback(
-    Output("interleaved-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Interleaved(ISA, Precision, Threads, Loads, Stores, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Interleaved"].unique())]
-
-
-@app.callback(
-    Output("drambytes-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_DRAMBytes(ISA, Precision, Threads, Loads, Stores, Interleaved, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["DRAMBytes"].unique())]
-
-
-@app.callback(
-    Output("fpinst-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("date-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_FPInst(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["FPInst"].unique())]
-
-
-@app.callback(
-    Output("date-dynamic-dropdown", "options"),
-    Input("isa-dynamic-dropdown", "value"),
-    Input("precision-dynamic-dropdown", "value"),
-    Input("threads-dynamic-dropdown", "value"),
-    Input("loads-dynamic-dropdown", "value"),
-    Input("stores-dynamic-dropdown", "value"),
-    Input("interleaved-dynamic-dropdown", "value"),
-    Input("drambytes-dynamic-dropdown", "value"),
-    Input("fpinst-dynamic-dropdown", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Date(
-    ISA,
-    Precision,
-    Threads,
-    Loads,
-    Stores,
-    Interleaved,
-    DRAMBytes,
-    FPInst,
-    selected_file,
-):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Date"].unique(), reverse=True)]
-
-
-@app.callback(
-    Output("isa-dynamic-dropdown2", "options"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_ISA2(
-    Precision,
-    Threads,
-    Loads,
-    Stores,
-    Interleaved,
-    DRAMBytes,
-    FPInst,
-    Date,
-    selected_file,
-):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["ISA"].unique())]
-
-
-@app.callback(
-    Output("precision-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Precision2(ISA, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return []
-
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-    if df.empty:
-        return []
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Precision"].unique())]
-
-
-@app.callback(
-    Output("threads-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Threads2(ISA, Precision, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Threads"].unique())]
-
-
-@app.callback(
-    Output("loads-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Loads2(ISA, Precision, Threads, Stores, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Loads"].unique())]
-
-
-@app.callback(
-    Output("stores-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Stores2(ISA, Precision, Threads, Loads, Interleaved, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Stores"].unique())]
-
-
-@app.callback(
-    Output("interleaved-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Interleaved2(ISA, Precision, Threads, Loads, Stores, DRAMBytes, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Interleaved"].unique())]
-
-
-@app.callback(
-    Output("drambytes-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_DRAMBytes2(ISA, Precision, Threads, Loads, Stores, Interleaved, FPInst, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["DRAMBytes"].unique())]
-
-
-@app.callback(
-    Output("fpinst-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("date-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_FPInst2(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, Date, selected_file):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if Date:
-        query_conditions.append("Date == @Date")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["FPInst"].unique())]
-
-
-@app.callback(
-    Output("date-dynamic-dropdown2", "options"),
-    Input("isa-dynamic-dropdown2", "value"),
-    Input("precision-dynamic-dropdown2", "value"),
-    Input("threads-dynamic-dropdown2", "value"),
-    Input("loads-dynamic-dropdown2", "value"),
-    Input("stores-dynamic-dropdown2", "value"),
-    Input("interleaved-dynamic-dropdown2", "value"),
-    Input("drambytes-dynamic-dropdown2", "value"),
-    Input("fpinst-dynamic-dropdown2", "value"),
-    Input("filename", "value"),
-    prevent_initial_call=True,
-)
-def chained_callback_Date2(
-    ISA,
-    Precision,
-    Threads,
-    Loads,
-    Stores,
-    Interleaved,
-    DRAMBytes,
-    FPInst,
-    selected_file,
-):
-    # Cross filtering of dropdowns callback, based on available results that respect the other dropdowns selections
-    if not selected_file:
-        return html.Div([])
-    # Read the CSV file and extract data
-    _, _, _, _, data_list = ut.read_csv_file(selected_file)
-    df = pd.DataFrame(data_list)
-
-    query_conditions = []
-    if ISA:
-        query_conditions.append("ISA == @ISA")
-    if Precision:
-        query_conditions.append("Precision == @Precision")
-    if Threads:
-        query_conditions.append("Threads == @Threads")
-    if Loads:
-        query_conditions.append("Loads == @Loads")
-    if Stores:
-        query_conditions.append("Stores == @Stores")
-    if Interleaved:
-        query_conditions.append("Interleaved == @Interleaved")
-    if DRAMBytes:
-        query_conditions.append("DRAMBytes == @DRAMBytes")
-    if FPInst:
-        query_conditions.append("FPInst == @FPInst")
-
-    if query_conditions:
-        query = " and ".join(query_conditions)
-        df = df.query(query)
-
-    return [{"label": precision, "value": precision} for precision in sorted(df["Date"].unique(), reverse=True)]
+_register_chained_dropdown_callbacks()
 
 
 @app.callback(
@@ -3931,104 +3020,44 @@ def chained_callback_Date2(
         Output("graph-yrange", "data"),
         Output("change-annon", "data"),
     ],
-    [
-        Input("isa-dynamic-dropdown", "value"),
-        Input("precision-dynamic-dropdown", "value"),
-        Input("threads-dynamic-dropdown", "value"),
-        Input("loads-dynamic-dropdown", "value"),
-        Input("stores-dynamic-dropdown", "value"),
-        Input("interleaved-dynamic-dropdown", "value"),
-        Input("drambytes-dynamic-dropdown", "value"),
-        Input("fpinst-dynamic-dropdown", "value"),
-        Input("date-dynamic-dropdown", "value"),
-        Input("isa-dynamic-dropdown2", "value"),
-        Input("precision-dynamic-dropdown2", "value"),
-        Input("threads-dynamic-dropdown2", "value"),
-        Input("loads-dynamic-dropdown2", "value"),
-        Input("stores-dynamic-dropdown2", "value"),
-        Input("interleaved-dynamic-dropdown2", "value"),
-        Input("drambytes-dynamic-dropdown2", "value"),
-        Input("fpinst-dynamic-dropdown2", "value"),
-        Input("date-dynamic-dropdown2", "value"),
-        Input("filename", "value"),
-        Input("value-slider", "value"),
-        Input("time-slider", "value"),
-        Input("input-number", "value"),
-        Input("average-checkbox", "value"),
-        Input("play-pause-button", "n_clicks"),
-        Input("interval-component", "n_intervals"),
-        Input("isa-checklist", "value"),
-        Input("precision-checklist", "value"),
-        Input("thread-checklist", "value"),
-        Input("color-radio", "value"),
-        Input("total-checklist", "value"),
-        Input("exponent-switch", "value"),
-        Input("line-legend-switch", "value"),
-        Input("normalize-switch", "value"),
-        Input("lower-filter", "value"),
-        Input("duration-filter", "value"),
-        Input("line-size", "value"),
-        Input("title-size", "value"),
-        Input("axis-size", "value"),
-        Input("tick-size", "value"),
-        Input("tooltip-size", "value"),
-        Input("legend-size", "value"),
-        Input("dot-size", "value"),
-        Input("button-paraver-mask", "n_clicks"),
-        Input("button-paraver-accumulate", "n_clicks"),
-        Input("button-paraver-colors", "n_clicks"),
-    ],
-    State("graphs", "figure"),
+    inputs=ANALYSIS_CALLBACK_INPUTS,
+    state={"figure": State("graphs", "figure")},
     prevent_initial_call=True,
 )
 def analysis(
-    ISA,
-    Precision,
-    Threads,
-    Loads,
-    Stores,
-    Interleaved,
-    DRAMBytes,
-    FPInst,
-    Date,
-    ISA2,
-    Precision2,
-    Threads2,
-    Loads2,
-    Stores2,
-    Interleaved2,
-    DRAMBytes2,
-    FPInst2,
-    Date2,
+    filters_primary,
+    filters_secondary,
     selected_file,
-    timestamps_range,
-    timestamps_max_range,
-    timestamps_grouper,
-    average,
-    n_clicks,
-    n_intervals,
-    ISA_timestamp,
-    Precision_timestamp,
-    Threads_timestamp,
-    color_radio,
-    plot_total,
-    exponent,
-    line_legend,
-    normalize,
-    lower_filter,
-    duration_filter,
-    line_size,
-    title_size,
-    axis_size,
-    tick_size,
-    tooltip_size,
-    legend_size,
-    dot_size,
-    mask_button,
-    accum_button,
-    paraver_color_button,
+    controls,
     figure,
 ):  # , intervals):
+    timestamps_range = controls["timestamps_range"]
+    timestamps_max_range = controls["timestamps_max_range"]
+    timestamps_grouper = controls["timestamps_grouper"]
+    average = controls["average"]
+    n_clicks = controls["n_clicks"]
+    n_intervals = controls["n_intervals"]
+    ISA_timestamp = controls["ISA_timestamp"]
+    Precision_timestamp = controls["Precision_timestamp"]
+    Threads_timestamp = controls["Threads_timestamp"]
+    color_radio = controls["color_radio"]
+    plot_total = controls["plot_total"]
+    exponent = controls["exponent"]
+    line_legend = controls["line_legend"]
+    normalize = controls["normalize"]
+    lower_filter = controls["lower_filter"]
+    duration_filter = controls["duration_filter"]
+    line_size = controls["line_size"]
+    title_size = controls["title_size"]
+    axis_size = controls["axis_size"]
+    tick_size = controls["tick_size"]
+    tooltip_size = controls["tooltip_size"]
+    legend_size = controls["legend_size"]
+    dot_size = controls["dot_size"]
+    mask_button = controls["mask_button"]
+    accum_button = controls["accum_button"]
+    paraver_color_button = controls["paraver_color_button"]
+
     # Callback to draw the CARM graph and plot everything
     top_flops2 = 0
     smallest_ai = 1000
@@ -4070,58 +3099,35 @@ def analysis(
 
     if trigger_id not in ["graphs", "interval-component"]:
         figure = go.Figure()
-    if mask_button_offset != -1:
-        if (mask_button + mask_button_offset) % 2 == 1:
-            use_paraver_mask = False
-        else:
-            use_paraver_mask = True
-    else:
-        use_paraver_mask = False
-
-    if (accum_button + ac_button_offset) % 2 == 1:
-        use_accumulate = False
-    else:
-        use_accumulate = True
-
-    if (paraver_color_button + color_button_offset) % 2 == 1:
-        use_paraver_colors = False
-    else:
-        use_paraver_colors = True
+    use_paraver_mask, use_accumulate, use_paraver_colors = resolve_analysis_paraver_toggles(
+        mask_button,
+        accum_button,
+        paraver_color_button,
+        mask_button_offset,
+        ac_button_offset,
+        color_button_offset,
+    )
 
     # Read roofline data and create DataFrame
     _, _, _, _, data_list = ut.read_csv_file(selected_file)
     df = pd.DataFrame(data_list)
-    if use_paraver_mask:
-        filtered_base = base_statistics_df[
-            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-            & (base_statistics_df["Duration"] >= float(duration_filter))
-            & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
-        ]
-    else:
-        filtered_base = base_statistics_df[
-            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-            & (base_statistics_df["Duration"] >= float(duration_filter))
-        ]
+    filtered_base, filtered_intel = filter_base_and_intel_data(
+        base_statistics_df,
+        intel_statistics_df2,
+        lower_filter,
+        duration_filter,
+        use_paraver_mask,
+        ut.is_valid_paraver_value,
+    )
 
-    filtered_intel = intel_statistics_df2.loc[filtered_base.index]
-    filtered_base = filtered_base.reset_index(drop=True)
-    filtered_intel = filtered_intel.reset_index(drop=True)
-
-    # Get timestamp range to display and filter timestamps dataframe accodingly
-    timestampls_real_range = [(x * timestamps_grouper + timestamps_max_range[0]) for x in timestamps_range]
-    if timestamps_range[1] == 0:
-        timestampls_real_range[1] = timestamps_grouper - 1
-
-    if (timestampls_real_range[1] + timestamps_grouper) > (timestamps_max_range[1] + 1):
-        df_filter = filtered_base.iloc[timestampls_real_range[0] : timestamps_max_range[1] + 1]
-        df_intel_filter = filtered_intel.iloc[timestampls_real_range[0] : timestamps_max_range[1] + 1]
-    else:
-        df_filter = filtered_base.iloc[timestampls_real_range[0] : timestampls_real_range[1] + timestamps_grouper]
-        df_intel_filter = filtered_intel.iloc[
-            timestampls_real_range[0] : timestampls_real_range[1] + timestamps_grouper
-        ]
+    # Get timestamp range to display and filter timestamps dataframe accordingly.
+    timestamp_start, timestamp_end = resolve_timestamp_slice_bounds(
+        timestamps_range,
+        timestamps_max_range,
+        timestamps_grouper,
+    )
+    df_filter = filtered_base.iloc[timestamp_start:timestamp_end]
+    df_intel_filter = filtered_intel.iloc[timestamp_start:timestamp_end]
 
     # Filter timestamps again to display based on the filter options
     df_intel_filter2 = ut.construct_query_timestamp(
@@ -4130,73 +3136,34 @@ def analysis(
     df_filter = df_filter[df_filter.index.isin(df_intel_filter2.index)]
     columns_to_check = df_intel_filter2.drop(columns=["ThreadID", "Paraver_Label", "Timestamp"], errors="ignore")
 
-    # Check what ISAs are still being used to adjust the roofline plot shown
-    if float(lower_filter) > 0:
-        positive_columns = columns_to_check.columns[(columns_to_check >= float(lower_filter)).any()].tolist()
-    else:
-        positive_columns = columns_to_check.columns[(columns_to_check > 0).any()].tolist()
-    if "ThreadID" in df_intel_filter2.columns:
-        positive_columns.append("ThreadID")
-    if ISA is None:
-        if any("AVX512" in col for col in positive_columns):
-            ISA = "avx512"
-        elif any("AVX2" in col for col in positive_columns):
-            ISA = "avx2"
-        elif any("SSE" in col for col in positive_columns):
-            ISA = "sse"
-        else:
-            ISA = "scalar"
+    # Check what ISAs are still being used to adjust the roofline plot shown.
+    ISA = infer_effective_isa_from_timestamp_columns(
+        columns_to_check,
+        lower_filter,
+        filters_primary["ISA"],
+        "ThreadID" in df_intel_filter2.columns,
+    )
+    primary_filters_for_query = dict(filters_primary)
+    primary_filters_for_query["ISA"] = ISA
 
     # Get queries for both sets of inputs for the roofline data
-    query2 = ut.construct_query(
-        ISA2,
-        Precision2,
-        Threads2,
-        Loads2,
-        Stores2,
-        Interleaved2,
-        DRAMBytes2,
-        FPInst2,
-        Date2,
-    )
-    query1 = ut.construct_query(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date)
+    query2 = ut.construct_query(filters_secondary)
+    query1 = ut.construct_query(primary_filters_for_query)
     # If user selects nothing yet, use the most recent roofline result
-    filtered_df1 = df.query(query1) if query1 else df
+    filtered_df1 = filter_roofline_df_by_query(df, query1)
 
     # If there is no available ISA that matches what the timestamps are using, cycle through them
-    i = 0
-    while filtered_df1.empty:
-        query1 = ut.construct_query(
-            intel_ISA[i],
-            Precision,
-            Threads,
-            Loads,
-            Stores,
-            Interleaved,
-            DRAMBytes,
-            FPInst,
-            Date,
+    if filtered_df1.empty:
+        filtered_df1 = fallback_roofline_df_by_isa(
+            df,
+            intel_ISA,
+            ut.construct_query,
+            primary_filters_for_query,
         )
-        filtered_df1 = df.query(query1) if query1 else df
-        i += 1
+
     # If the user selects anything from the second set of dropdowns, get the matching roofline data
     filtered_df2 = (
-        df.query(query2)
-        if query2
-        and any(
-            [
-                ISA2,
-                Precision2,
-                Threads2,
-                Loads2,
-                Stores2,
-                Interleaved2,
-                DRAMBytes2,
-                FPInst2,
-                Date2,
-            ]
-        )
-        else pd.DataFrame()
+        filter_roofline_df_by_query(df, query2) if query2 and any(filters_secondary.values()) else pd.DataFrame()
     )
 
     # Totals from the timestamps for plotting
@@ -4208,186 +3175,47 @@ def analysis(
     # Plot Timestamps, if its a zoom we skip this
     if timestamps_range is not None:
         first = True
-        # If we are averaging the timestamps calculate the values to plot
-        if average and timestamps_grouper > 1:
-            extra_average = " Averaged "
-            # Create a grouping variable based on 'timestamps_grouper'
-            df_filter = df_filter.copy()
-            df_filter["group"] = ((df_filter.index - timestampls_real_range[0]) // timestamps_grouper).astype(int)
-            df_filter["ai"] = df_filter["Arithmetic_Intensity"]
-            df_filter["gflops"] = df_filter["GFLOPS"]
-            df_filter["timestamp"] = df_filter["Timestamp"]
-            durations = df_filter["Duration"].tolist()
-            thread_IDs = df_filter["ThreadID"].tolist()
+        timestamp_series, min_ai, min_gflops = prepare_timestamp_series(
+            df_filter,
+            df_intel_filter2,
+            average,
+            timestamps_grouper,
+            timestamp_start,
+            use_accumulate,
+        )
+        extra_average = timestamp_series.extra_average
 
-            # Group the data and compute the mean for 'ai' and 'gflops'
-            grouped = df_filter.groupby("group")
-            ai_mean = grouped["ai"].mean().reset_index(drop=True)
-            if len(ai_mean) > 0:
-                smallest_ai = min(ai_mean)
-            gflops_mean = grouped["gflops"].mean().reset_index(drop=True)
-            if len(gflops_mean) > 0:
-                smallest_gflops = min(gflops_mean)
+        if min_ai is not None:
+            smallest_ai = min_ai
+        if min_gflops is not None:
+            smallest_gflops = min_gflops
 
-            # Create labels by joining the timestamps involved in each group
-            timestamps_grouped = (
-                grouped["timestamp"]
-                .apply(lambda x: f"{x.iloc[0]}" if len(x) == 1 else f"{x.iloc[0]}...{x.iloc[-1]}")
-                .reset_index(drop=True)
+        n = timestamp_series.count
+        data_points = n
+
+        def add_timestamp_point_trace(
+            point,
+            color_context,
+            trace_name,
+            showlegend,
+            legendgroup=None,
+        ):
+            color = select_timestamp_color(point, color_context)
+            tooltip_text = ut.build_timestamp_tooltip_text(*build_timestamp_tooltip_args(point, window_name))
+            figure.add_trace(
+                go.Scatter(
+                    **build_timestamp_scatter_trace(
+                        point.ai_value,
+                        point.gflops_value,
+                        trace_name,
+                        dot_size,
+                        color,
+                        tooltip_text,
+                        showlegend,
+                        legendgroup=legendgroup,
+                    )
+                )
             )
-
-            df_intel_filter2 = df_intel_filter2.copy()
-            df_intel_filter2["group"] = (
-                (df_intel_filter2.index - timestampls_real_range[0]) // timestamps_grouper
-            ).astype(int)
-            grouped_intel = df_intel_filter2.groupby("group")
-
-            scalar_sp_mean = grouped_intel["Intel_FP_Scalar_SP"].mean().reset_index(drop=True)
-            scalar_dp_mean = grouped_intel["Intel_FP_Scalar_DP"].mean().reset_index(drop=True)
-            sse_sp_mean = grouped_intel["Intel_FP_SSE_SP"].mean().reset_index(drop=True)
-            sse_dp_mean = grouped_intel["Intel_FP_SSE_DP"].mean().reset_index(drop=True)
-            avx2_sp_mean = grouped_intel["Intel_FP_AVX2_SP"].mean().reset_index(drop=True)
-            avx2_dp_mean = grouped_intel["Intel_FP_AVX2_DP"].mean().reset_index(drop=True)
-            avx512_sp_mean = grouped_intel["Intel_FP_AVX512_SP"].mean().reset_index(drop=True)
-            avx512_dp_mean = grouped_intel["Intel_FP_AVX512_DP"].mean().reset_index(drop=True)
-            dp_mean = grouped_intel["Intel_FP_DP"].mean().reset_index(drop=True)
-            fp_total_mean = grouped_intel["Intel_FP_Total"].mean().reset_index(drop=True)
-            load_mean = grouped_intel["Intel_Load"].mean().reset_index(drop=True)
-            store_mean = grouped_intel["Intel_Store"].mean().reset_index(drop=True)
-
-            scalar_perc = (((scalar_sp_mean + scalar_dp_mean) / fp_total_mean) * 100).tolist()
-            sse_perc = (((sse_sp_mean + sse_dp_mean) / fp_total_mean) * 100).tolist()
-            avx2_perc = (((avx2_sp_mean + avx2_dp_mean) / fp_total_mean) * 100).tolist()
-            avx512_perc = (((avx512_sp_mean + avx512_dp_mean) / fp_total_mean) * 100).tolist()
-            dp_perc = ((dp_mean / fp_total_mean) * 100).tolist()
-            load_perc = ((load_mean / (load_mean + store_mean)) * 100).tolist()
-
-            n = len(ai_mean)
-        # If we are not averaging the timestamps calculate the values to plot
-        else:
-            # If we are accumulating values based on the Paraver mask
-            if use_accumulate:
-                df = df_filter.copy()
-                df_intel = df_intel_filter2.copy()
-                df = df.sort_values(by=["ThreadID", "Timestamp"]).reset_index(drop=True)
-                df_intel = df_intel.sort_values(by=["ThreadID", "Timestamp"]).reset_index(drop=True)
-
-                df["label_shift"] = df.groupby("ThreadID")["Paraver_Label"].shift()
-                df["label_changed"] = df["Paraver_Label"] != df["label_shift"]
-                df_intel["label_shift"] = df_intel.groupby("ThreadID")["Paraver_Label"].shift()
-                df_intel["label_changed"] = df_intel["Paraver_Label"] != df_intel["label_shift"]
-
-                df["group"] = df.groupby("ThreadID")["label_changed"].cumsum()
-                df_intel["group"] = df_intel.groupby("ThreadID")["label_changed"].cumsum()
-
-                df_filter = (
-                    df.groupby(["ThreadID", "group"])
-                    .agg(
-                        {
-                            "ThreadID": "first",
-                            "Timestamp": lambda x: f"{x.min()}" if x.min() == x.max() else f"{x.min()} - {x.max()}",
-                            "Duration": "sum",
-                            "Paraver_Label": "first",
-                            "Paraver_Value": "first",
-                            "R": "first",
-                            "G": "first",
-                            "B": "first",
-                            "FLOP": "sum",
-                            "Bytes": "sum",
-                        }
-                    )
-                    .reset_index(drop=True)
-                )
-
-                df_intel_filter2 = (
-                    df_intel.groupby(["ThreadID", "group"])
-                    .agg(
-                        {
-                            "ThreadID": "first",
-                            "Timestamp": "min",
-                            "Intel_FP_Scalar_SP": "sum",
-                            "Intel_FP_Scalar_DP": "sum",
-                            "Intel_FP_SSE_SP": "sum",
-                            "Intel_FP_SSE_DP": "sum",
-                            "Intel_FP_AVX2_SP": "sum",
-                            "Intel_FP_AVX2_DP": "sum",
-                            "Intel_FP_AVX512_SP": "sum",
-                            "Intel_FP_AVX512_DP": "sum",
-                            "Intel_FP_SP": "sum",
-                            "Intel_FP_DP": "sum",
-                            "Intel_FP_Total": "sum",
-                            "Intel_Load": "sum",
-                            "Intel_Store": "sum",
-                            "Paraver_Label": "first",
-                        }
-                    )
-                    .reset_index(drop=True)
-                )
-
-                df_filter["GFLOPS"] = df_filter["FLOP"] / (df_filter["Duration"] * 1e3)
-                df_filter["Bandwidth"] = df_filter["Bytes"] / df_filter["Duration"]
-                df_filter["Arithmetic_Intensity"] = df_filter["FLOP"] / df_filter["Bytes"]
-
-                df.drop(columns=["group"], inplace=True)
-
-            extra_average = " "
-            ai_mean = df_filter["Arithmetic_Intensity"].tolist()
-            if len(ai_mean) > 0:
-                smallest_ai = min(ai_mean)
-            n = len(ai_mean)
-            data_points = n
-            gflops_mean = df_filter["GFLOPS"].tolist()
-            if len(gflops_mean) > 0:
-                smallest_gflops = min(gflops_mean)
-            timestamps_grouped = df_filter["Timestamp"].tolist()
-            durations = df_filter["Duration"].tolist()
-            thread_IDs = df_filter["ThreadID"].tolist()
-            reds = df_filter["R"].tolist()
-            greens = df_filter["G"].tolist()
-            blues = df_filter["B"].tolist()
-            pvalues = df_filter["Paraver_Value"].tolist()
-            plabels = df_filter["Paraver_Label"].tolist()
-
-            scalar_perc = (
-                (
-                    (df_intel_filter2["Intel_FP_Scalar_SP"] + df_intel_filter2["Intel_FP_Scalar_DP"])
-                    / df_intel_filter2["Intel_FP_Total"]
-                )
-                * 100
-            ).tolist()
-            sse_perc = (
-                (
-                    (df_intel_filter2["Intel_FP_SSE_SP"] + df_intel_filter2["Intel_FP_SSE_DP"])
-                    / df_intel_filter2["Intel_FP_Total"]
-                )
-                * 100
-            ).tolist()
-            avx2_perc = (
-                (
-                    (df_intel_filter2["Intel_FP_AVX2_SP"] + df_intel_filter2["Intel_FP_AVX2_DP"])
-                    / df_intel_filter2["Intel_FP_Total"]
-                )
-                * 100
-            ).tolist()
-            avx512_perc = (
-                (
-                    (df_intel_filter2["Intel_FP_AVX512_SP"] + df_intel_filter2["Intel_FP_AVX512_DP"])
-                    / df_intel_filter2["Intel_FP_Total"]
-                )
-                * 100
-            ).tolist()
-            if use_accumulate:
-                dp_perc = ((df_intel_filter2["Intel_FP_DP"] / df_intel_filter2["Intel_FP_Total"]) * 100).tolist()
-                load_perc = (
-                    (
-                        df_intel_filter2["Intel_Load"]
-                        / (df_intel_filter2["Intel_Load"] + df_intel_filter2["Intel_Store"])
-                    )
-                    * 100
-                ).tolist()
-            else:
-                dp_perc = ((df_intel_filter2["Intel_FP_DP"] / df_intel_filter2["Intel_FP_Total"]) * 100).tolist()
-                load_perc = (df_intel_filter2["Intel_Load_Percent"]).tolist()
 
         # If the play function is activated
         if trigger_id == "play-pause-button" and data_points > 0:
@@ -4398,225 +3226,58 @@ def analysis(
             if figure is not None:
                 figure = copy.deepcopy(figure)
                 figure = go.Figure(figure)
-            if n_intervals == 0:
-                indexer = data_points - 1
-            else:
-                indexer = n_intervals - 1
-
-            if indexer == 0:
-                first = True
-            else:
-                first = False
-
-            if color_radio in ["ISA", "Precision", "LD/ST Percentage", "Thread ID"]:
-                color = ut.blend_colors(
-                    scalar_perc[indexer],
-                    sse_perc[indexer],
-                    avx2_perc[indexer],
-                    avx512_perc[indexer],
-                    dp_perc[indexer],
-                    load_perc[indexer],
-                    thread_IDs[indexer],
-                    color_radio,
-                    False,
-                )
-            elif color_radio == "Paraver":
-                color = f"rgb({reds[indexer]},{greens[indexer]},{blues[indexer]})"
-            else:
-                color = ut.interpolate_color(start_color, end_color, indexer / n)
-            tooltip_text = ut.build_timestamp_tooltip_text(
-                scalar_perc[indexer],
-                sse_perc[indexer],
-                avx2_perc[indexer],
-                avx512_perc[indexer],
-                dp_perc[indexer],
-                load_perc[indexer],
-                timestamps_grouped[indexer],
-                thread_IDs[indexer],
-                durations[indexer],
-                pvalues[indexer],
-                plabels[indexer],
-                window_name,
+            indexer, first = resolve_interval_point_index_and_legend(n_intervals, data_points)
+            point = get_timestamp_point(timestamp_series, indexer)
+            color_context = TimestampColorContext(
+                use_paraver_colors=False,
+                color_radio=color_radio,
+                index=indexer,
+                n_points=n,
+                start_color=start_color,
+                end_color=end_color,
+                blend_colors_fn=ut.blend_colors,
+                interpolate_color_fn=ut.interpolate_color,
             )
-
-            figure.add_trace(
-                go.Scatter(
-                    x=[ai_mean[indexer]],
-                    y=[gflops_mean[indexer]],
-                    mode="markers",
-                    name=f"{name_app}{extra_average}Timestamps",
-                    marker={"size": dot_size, "color": color},
-                    legendgroup="1",
-                    showlegend=first,
-                    text=[tooltip_text],
-                    hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
-                )
+            add_timestamp_point_trace(
+                point,
+                color_context,
+                f"{name_app}{extra_average}Timestamps",
+                first,
+                legendgroup="1",
             )
         # If we are just doing regular plotting
         else:
             first = True
-            plabel_aux = []
-            for index, (
-                ai_value,
-                gflops_value,
-                timestamp_label,
-                scalar,
-                sse,
-                avx2,
-                avx512,
-                dp,
-                load,
-                thread_ID,
-                duration,
-                red,
-                green,
-                blue,
-                pvalue,
-                plabel,
-            ) in enumerate(
-                zip(
-                    ai_mean,
-                    gflops_mean,
-                    timestamps_grouped,
-                    scalar_perc,
-                    sse_perc,
-                    avx2_perc,
-                    avx512_perc,
-                    dp_perc,
-                    load_perc,
-                    thread_IDs,
-                    durations,
-                    reds,
-                    greens,
-                    blues,
-                    pvalues,
-                    plabels,
-                    strict=False,
+            plabel_aux = set()
+            color_context = TimestampColorContext(
+                use_paraver_colors=use_paraver_colors,
+                color_radio=color_radio,
+                index=0,
+                n_points=n,
+                start_color=start_color,
+                end_color=end_color,
+                blend_colors_fn=ut.blend_colors,
+                interpolate_color_fn=ut.interpolate_color,
+            )
+            for index, point in enumerate(iter_timestamp_points(timestamp_series)):
+                if not should_plot_timestamp_point(use_paraver_mask, point):
+                    continue
+
+                color_context.index = index
+
+                showlegend, legend_plabel, first = resolve_timestamp_legend_state(
+                    use_paraver_colors,
+                    point.plabel,
+                    plabel_aux,
+                    first,
                 )
-            ):
-                if use_paraver_mask:
-                    if pvalue > 0:
-                        if use_paraver_colors:
-                            color = f"rgb({red},{green},{blue})"
-                            if plabel in plabel_aux:
-                                first = False
-                            else:
-                                plabel_aux.append(plabel)
-                                first = True
-                        else:
-                            if color_radio in [
-                                "ISA",
-                                "Precision",
-                                "LD/ST Percentage",
-                                "Thread ID",
-                            ]:
-                                color = ut.blend_colors(
-                                    scalar,
-                                    sse,
-                                    avx2,
-                                    avx512,
-                                    dp,
-                                    load,
-                                    thread_ID,
-                                    color_radio,
-                                    False,
-                                )
-                            else:
-                                color = ut.interpolate_color(start_color, end_color, index / n)
 
-                        tooltip_text = ut.build_timestamp_tooltip_text(
-                            scalar,
-                            sse,
-                            avx2,
-                            avx512,
-                            dp,
-                            load,
-                            timestamp_label,
-                            thread_ID,
-                            duration,
-                            pvalue,
-                            plabel,
-                            window_name,
-                        )
-
-                        if not use_paraver_colors:
-                            plabel = ""
-
-                        figure.add_trace(
-                            go.Scatter(
-                                x=[ai_value],
-                                y=[gflops_value],
-                                mode="markers",
-                                name=f"{name_app}{extra_average}{plabel} Timestamps",
-                                marker={"size": dot_size, "color": color},
-                                showlegend=first,
-                                text=[tooltip_text],
-                                hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
-                            )
-                        )
-                        if not use_paraver_colors:
-                            first = False
-
-                else:
-                    if use_paraver_colors:
-                        color = f"rgb({red},{green},{blue})"
-                        if plabel in plabel_aux:
-                            first = False
-                        else:
-                            plabel_aux.append(plabel)
-                            first = True
-                    else:
-                        if color_radio in [
-                            "ISA",
-                            "Precision",
-                            "LD/ST Percentage",
-                            "Thread ID",
-                        ]:
-                            color = ut.blend_colors(
-                                scalar,
-                                sse,
-                                avx2,
-                                avx512,
-                                dp,
-                                load,
-                                thread_ID,
-                                color_radio,
-                                False,
-                            )
-                        else:
-                            color = ut.interpolate_color(start_color, end_color, index / n)
-                    tooltip_text = ut.build_timestamp_tooltip_text(
-                        scalar,
-                        sse,
-                        avx2,
-                        avx512,
-                        dp,
-                        load,
-                        timestamp_label,
-                        thread_ID,
-                        duration,
-                        pvalue,
-                        plabel,
-                        window_name,
-                    )
-
-                    if not use_paraver_colors:
-                        plabel = ""
-
-                    figure.add_trace(
-                        go.Scatter(
-                            x=[ai_value],
-                            y=[gflops_value],
-                            mode="markers",
-                            name=f"{name_app}{extra_average}{plabel} Timestamps",
-                            marker={"size": dot_size, "color": color},
-                            showlegend=first,
-                            text=[tooltip_text],
-                            hovertemplate="<b>%{text}</b><br>(%{x}, %{y})<br><extra></extra>",
-                        )
-                    )
-                    if not use_paraver_colors:
-                        first = False
+                add_timestamp_point_trace(
+                    point,
+                    color_context,
+                    f"{name_app}{extra_average}{legend_plabel} Timestamps",
+                    showlegend,
+                )
 
     if trigger_id not in ["interval-component"]:
         # If we want to plot the total dot
@@ -4692,96 +3353,104 @@ def analysis(
         figure.update_yaxes(showspikes=True)
 
     # Plot the roofline lines if possible, based on the data range and calculate angles for the annotations
-    if not filtered_df1.empty:
-        values1 = filtered_df1.iloc[-1][["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]].tolist()
-        ISA = filtered_df1.iloc[-1][["ISA"]].tolist()
-        # scale down bandwidth and compute ceilings if normalization requested
-        if normalize:
-            try:
-                threads1 = float(filtered_df1.iloc[-1]["Threads"])
-            except Exception:
-                threads1 = 1.0
-            if threads1 > 0:
-                # indices 0-3: L1,L2,L3,DRAM bandwidths
-                # indices 4-5: FP and FP_FMA ceilings
-                for i in range(6):
-                    try:
-                        values1[i] = values1[i] / threads1
-                    except Exception:
-                        # ignore non-numeric labels (e.g. FPInst at index 6)
-                        pass
-        lines = ut.calculate_roofline(values1, smallest_ai / 5)
-        if lines != lines_origin and len(lines_origin) > 0 and trigger_id != "interval-component":
-            change_annotation = 1
-            annotations = {}
-        lines_origin = lines
-        top_flops = lines["L1"]["ridge"][1]
-        smallest_gflops = min(smallest_gflops, lines["DRAM"]["start"][1])
-        # If its just a zoom we dont plot the lines again, just re-calculate the angles for the annotations
-        if trigger_id not in ["graphs", "interval-component"]:
-            figure.add_traces(ut.plot_roofline(values1, lines, "", ISA[0], line_legend, int(line_size)))
-
-        # Grab the axis range of the plot, after its reset or not
-        xaxis_range = figure.layout.xaxis.range
-        if xaxis_range:
-            x_min_angle = 10 ** xaxis_range[0]
-            x_max_angle = 10 ** xaxis_range[1]
-        else:
-            x_min_angle = min(0.00390625, smallest_ai / 5)
-            x_max_angle = 256
-
-        # Extract the current y-axis range if available, otherwise use the data's min/max
-        yaxis_range = figure.layout.yaxis.range
-
-        if yaxis_range:
-            y_min_angle = 10 ** yaxis_range[0]
-            y_max_angle = 10 ** yaxis_range[1]
-        else:
-            y_min_angle = lines["DRAM"]["start"][1] * 0.5
-            y_max_angle = max(lines["L1"]["ridge"][1], max(top_flops2, top_flops)) * 2
-
+    lines = {}
     lines2 = {}
+    values1 = []
     values2 = []
-    if not filtered_df2.empty and query2 is not None:
-        values2 = filtered_df2.iloc[-1][["L1", "L2", "L3", "DRAM", "FP", "FP_FMA", "FPInst"]].tolist()
-        ISA.append(filtered_df2.iloc[-1][["ISA"]].tolist()[0])
-        # apply normalization if requested
-        if normalize:
-            try:
-                threads2 = float(filtered_df2.iloc[-1]["Threads"])
-            except Exception:
-                threads2 = 1.0
-            if threads2 > 0:
-                for i in range(6):
-                    try:
-                        values2[i] = values2[i] / threads2
-                    except Exception:
-                        pass
-        lines2 = ut.calculate_roofline(values2, smallest_ai / 5)
+    isa_labels = []
+    top_flops = 0
+    top_flops2 = 0
+    x_min_angle = 0
+    x_max_angle = 0
+    y_min_angle = 0
+    y_max_angle = 0
 
-        if lines2 != lines_origin2 and trigger_id != "interval-component":
-            change_annotation = 1
-            annotations = {}
-        lines_origin2 = lines2
+    def process_roofline_profile(profile, previous_lines, suffix, require_existing_old_lines=False):
+        if profile is None:
+            reset_annotations = should_reset_annotations_for_lines({}, previous_lines, trigger_id)
+            return {
+                "values": [],
+                "isa": None,
+                "lines": {},
+                "top_flops": 0,
+                "min_gflops": None,
+                "reset_annotations": reset_annotations,
+            }
 
-        top_flops2 = lines2["L1"]["ridge"][1]
+        values, isa, profile_lines, profile_top_flops, profile_min_gflops = profile
+        reset_annotations = should_reset_annotations_for_lines(
+            profile_lines,
+            previous_lines,
+            trigger_id,
+            require_existing_old_lines=require_existing_old_lines,
+        )
+
+        # If its just a zoom we dont plot the lines again, just re-calculate annotation angles.
         if trigger_id not in ["graphs", "interval-component"]:
-            figure.add_traces(ut.plot_roofline(values2, lines2, "2", ISA[1], line_legend, int(line_size)))
+            figure.add_traces(ut.plot_roofline(values, profile_lines, suffix, isa, line_legend, int(line_size)))
+
+        return {
+            "values": values,
+            "isa": isa,
+            "lines": profile_lines,
+            "top_flops": profile_top_flops,
+            "min_gflops": profile_min_gflops,
+            "reset_annotations": reset_annotations,
+        }
+
+    profile1 = calculate_roofline_profile(filtered_df1, normalize, smallest_ai, ut.calculate_roofline)
+    profile1_result = process_roofline_profile(
+        profile1,
+        lines_origin,
+        "",
+        require_existing_old_lines=True,
+    )
+    values1 = profile1_result["values"]
+    lines = profile1_result["lines"]
+    top_flops = profile1_result["top_flops"]
+    if profile1_result["isa"] is not None:
+        isa_labels.append(profile1_result["isa"])
+    if profile1_result["min_gflops"] is not None:
+        smallest_gflops = min(smallest_gflops, profile1_result["min_gflops"])
+    if profile1_result["reset_annotations"]:
+        change_annotation = 1
+        annotations = {}
+    lines_origin = lines
+
+    if query2 is not None:
+        profile2 = calculate_roofline_profile(filtered_df2, normalize, smallest_ai, ut.calculate_roofline)
     else:
-        if lines2 != lines_origin2 and trigger_id != "interval-component":
-            change_annotation = 1
-            annotations = {}
-        lines_origin2 = lines2
+        profile2 = None
 
-    if exponent:
-        xaxis_range = figure.layout.xaxis.range
-        x_min = min(0.00390625, smallest_ai / 5)
-        x_max = 256
+    profile2_result = process_roofline_profile(profile2, lines_origin2, "2")
+    values2 = profile2_result["values"]
+    lines2 = profile2_result["lines"]
+    top_flops2 = profile2_result["top_flops"]
+    if profile2_result["isa"] is not None:
+        isa_labels.append(profile2_result["isa"])
+    if profile2_result["min_gflops"] is not None:
+        smallest_gflops = min(smallest_gflops, profile2_result["min_gflops"])
+    if profile2_result["reset_annotations"]:
+        change_annotation = 1
+        annotations = {}
+    lines_origin2 = lines2
 
-        # Extract the current y-axis range if available, otherwise use the data's min/max
-        yaxis_range = figure.layout.yaxis.range
-        y_min = min(smallest_gflops / 5, lines["DRAM"]["start"][1] / 5)
-        y_max = max(lines["L1"]["ridge"][1], max(top_flops2, top_flops)) * 1.3
+    angle_source_lines = lines if lines else lines2
+    if angle_source_lines:
+        x_min_angle, x_max_angle, y_min_angle, y_max_angle = resolve_roofline_angle_bounds(
+            figure.layout.xaxis.range,
+            figure.layout.yaxis.range,
+            smallest_ai,
+            angle_source_lines["DRAM"]["start"][1],
+            max(angle_source_lines["L1"]["ridge"][1], max(top_flops2, top_flops)),
+        )
+
+    base_lines = lines if lines else lines2
+    if exponent and base_lines:
+        x_min, x_max = resolve_roofline_x_bounds(smallest_ai)
+
+        y_min = min(smallest_gflops / 5, base_lines["DRAM"]["start"][1] / 5)
+        y_max = max(base_lines["L1"]["ridge"][1], max(top_flops2, top_flops)) * 1.3
 
         x_tickvals, x_ticktext = ut.make_power_of_two_ticks(x_min, x_max)
         y_tickvals, y_ticktext = ut.make_power_of_two_ticks(y_min, y_max)
@@ -4806,7 +3475,7 @@ def analysis(
         lines2,
         values1,
         values2,
-        ISA,
+        isa_labels,
         [x_min_angle, x_max_angle],
         [y_min_angle, y_max_angle],
         change_annotation,
@@ -5070,6 +3739,109 @@ def update_number(
     return new_value, n_segments
 
 
+def _get_timestamp_segments(lower_filter, duration_filter, use_paraver_mask, start_index=None, end_index=None):
+    filtered_base, _ = filter_base_and_intel_data(
+        base_statistics_df,
+        intel_statistics_df2,
+        lower_filter,
+        duration_filter,
+        use_paraver_mask,
+        ut.is_valid_paraver_value,
+    )
+
+    if start_index is not None and end_index is not None:
+        return filtered_base.loc[start_index:end_index, "Timestamp"].tolist()
+
+    return filtered_base["Timestamp"].tolist()
+
+
+def _group_slider_segments(segments, group_value):
+    grouped_segments = []
+    for i in range(0, len(segments), group_value):
+        current_group = segments[i : i + group_value]
+        if len(current_group) > 1:
+            grouped_segments.append(f"{current_group[0]}...{current_group[-1]}")
+        else:
+            grouped_segments.append(f"{current_group[0]}")
+    return grouped_segments
+
+
+def _build_slider_marks(grouped_segments):
+    return {i: {"label": value} for i, value in enumerate(grouped_segments)}
+
+
+def _apply_alternating_mark_styles(marks):
+    for i in marks:
+        marks[i]["style"] = {"margin-top": "0px"} if i % 2 == 0 else {"margin-top": "-35px"}
+
+
+def _select_current_range_marks(marks, current_values, grouped_segments):
+    if isinstance(current_values, list) and len(current_values) == 2 and len(grouped_segments) > 1:
+        return {
+            current_values[0]: marks[current_values[0]],
+            current_values[1]: marks[current_values[1]],
+        }
+    if isinstance(current_values, list) and len(current_values) == 2:
+        return {current_values[0]: marks[current_values[0]]}
+    return {current_values: marks[current_values]}
+
+
+def _apply_two_mark_style(filtered_marks):
+    sorted_keys = sorted(filtered_marks.keys())
+    if len(sorted_keys) == 2:
+        filtered_marks[sorted_keys[0]]["style"] = {"margin-top": "0px"}
+        filtered_marks[sorted_keys[1]]["style"] = {"margin-top": "-35px"}
+
+
+def _resolve_slider_marks_result(
+    segments,
+    group_value,
+    current_values,
+    max_marks,
+    initial_range,
+    reset_view,
+):
+    if len(segments) == 0:
+        safe_marks = {0: {"label": "No data", "style": {"margin-top": "0px"}}}
+        return safe_marks, 0, [0, 0]
+
+    grouped_segments = _group_slider_segments(segments, group_value)
+    marks = _build_slider_marks(grouped_segments)
+    max_index = len(grouped_segments) - 1
+
+    if max_index <= max_marks:
+        _apply_alternating_mark_styles(marks)
+
+    if reset_view:
+        if max_index > max_marks:
+            filtered_marks = {
+                initial_range[0]: marks[initial_range[0]],
+                initial_range[1]: marks[initial_range[1]],
+            }
+            _apply_two_mark_style(filtered_marks)
+            return filtered_marks, max_index, initial_range
+        return marks, max_index, initial_range
+
+    filtered_marks = _select_current_range_marks(marks, current_values, grouped_segments)
+
+    if max_index > max_marks:
+        _apply_two_mark_style(filtered_marks)
+        return filtered_marks, max_index, current_values
+
+    return marks, max_index, current_values
+
+
+SLIDER_MARKS_CONFIG = {
+    "time": {
+        "max_marks": 15,
+        "reset_triggers": {"lower-filter", "duration-filter", "button-paraver-mask"},
+    },
+    "value": {
+        "reset_triggers": {"input-number", "lower-filter", "duration-filter", "time-slider", "button-paraver-mask"},
+    },
+}
+
+
 @app.callback(
     [
         Output("time-slider", "marks"),
@@ -5086,100 +3858,28 @@ def update_number(
 def update_slider_marks2(current_values, lower_filter, duration_filter, mask_button):
     global mask_button_offset
     if mask_button_offset != -1:
-        if (mask_button + mask_button_offset) % 2 == 1:
-            use_paraver_mask = False
-        else:
-            use_paraver_mask = True
+        use_paraver_mask = resolve_toggle_enabled(mask_button, mask_button_offset)
     else:
         use_paraver_mask = False
 
     # Callback to update the timestamp slider marks
-    if use_paraver_mask:
-        filtered_base = base_statistics_df[
-            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-            & (base_statistics_df["Duration"] >= float(duration_filter))
-            & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
-        ]
-    else:
-        filtered_base = base_statistics_df[
-            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-            & (base_statistics_df["Duration"] >= float(duration_filter))
-        ]
-
-    filtered_base = filtered_base.reset_index(drop=True)
-    segments = filtered_base["Timestamp"].tolist()
-    n_segments = len(segments)
-    if n_segments == 0:
-        safe_marks = {0: {"label": "No data", "style": {"margin-top": "0px"}}}
-        return safe_marks, 0, [0, 0]
-    # Calculate the number of items per group
-    grouped_segments = []
-    group_value = 1
-
-    for i in range(0, n_segments, group_value):
-        current_group = segments[i : i + group_value]
-        if len(current_group) > 1:
-            grouped_segment = f"{current_group[0]}...{current_group[-1]}"
-        else:
-            grouped_segment = f"{current_group[0]}"
-        grouped_segments.append(grouped_segment)
-
-    marks = {i: {"label": v} for i, v in enumerate(grouped_segments)}
-    max_index = len(grouped_segments) - 1
-
-    if max_index <= 15:
-        for i in marks:
-            if i % 2 == 0:
-                marks[i]["style"] = {"margin-top": "0px"}
-            else:
-                marks[i]["style"] = {"margin-top": "-35px"}
+    segments = _get_timestamp_segments(lower_filter, duration_filter, use_paraver_mask)
 
     ctx = callback_context
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if (
-        triggered_id == "input-number"
-        or current_values is None
-        or triggered_id in ["lower-filter", "duration-filter", "button-paraver-mask"]
-    ):
-        initial_range = [0, max(min(max_index, 1), 1)]
+    reset_view = current_values is None or triggered_id in SLIDER_MARKS_CONFIG["time"]["reset_triggers"]
 
-        if max_index > 15:
-            # Only show two marks and apply top/bottom logic to these two
-            filtered_marks = {
-                initial_range[0]: marks[initial_range[0]],
-                initial_range[1]: marks[initial_range[1]],
-            }
-            # First mark on bottom, second on top
-            filtered_marks[initial_range[0]]["style"] = {"margin-top": "0px"}
-            filtered_marks[initial_range[1]]["style"] = {"margin-top": "-35px"}
-            return filtered_marks, max_index, initial_range
-        else:
-            return marks, max_index, initial_range
+    max_index = max(len(segments) - 1, 0)
+    initial_range = [0, max(min(max_index, 1), 1)]
 
-    # Update to only show the first and last marks within the selected range
-    if isinstance(current_values, list) and len(current_values) == 2 and len(grouped_segments) > 1:
-        filtered_marks = {
-            current_values[0]: marks[current_values[0]],
-            current_values[1]: marks[current_values[1]],
-        }
-    elif isinstance(current_values, list) and len(current_values) == 2:
-        # If there is only one item in the range, show it only
-        filtered_marks = {current_values[0]: marks[current_values[0]]}
-    else:
-        # For single value sliders, just show the selected mark
-        filtered_marks = {current_values: marks[current_values]}
-
-    if max_index > 15:
-        # Only two marks, first bottom, second top
-        sorted_keys = sorted(filtered_marks.keys())
-        if len(sorted_keys) == 2:
-            filtered_marks[sorted_keys[0]]["style"] = {"margin-top": "0px"}
-            filtered_marks[sorted_keys[1]]["style"] = {"margin-top": "-35px"}
-        return filtered_marks, max_index, current_values
-    else:
-        return marks, max_index, current_values
+    return _resolve_slider_marks_result(
+        segments,
+        group_value=1,
+        current_values=current_values,
+        max_marks=SLIDER_MARKS_CONFIG["time"]["max_marks"],
+        initial_range=initial_range,
+        reset_view=reset_view,
+    )
 
 
 @app.callback(
@@ -5212,113 +3912,39 @@ def update_slider_marks(
     start_index = time_values[0]
     end_index = time_values[1]
 
-    if timestamps_grouper > 1:
-        max_marks = 8
-    else:
-        max_marks = 15
+    max_marks = 8 if timestamps_grouper > 1 else 15
     if mask_button_offset != -1:
-        if (mask_button + mask_button_offset) % 2 == 1:
-            use_paraver_mask = False
-        else:
-            use_paraver_mask = True
+        use_paraver_mask = resolve_toggle_enabled(mask_button, mask_button_offset)
     else:
         use_paraver_mask = False
 
-    if use_paraver_mask:
-        filtered_base = base_statistics_df[
-            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-            & (base_statistics_df["Duration"] >= float(duration_filter))
-            & (base_statistics_df["Paraver_Value"].apply(ut.is_valid_paraver_value))
-        ]
-    else:
-        filtered_base = base_statistics_df[
-            (base_statistics_df["Arithmetic_Intensity"] >= float(lower_filter))
-            & (base_statistics_df["GFLOPS"] >= float(lower_filter))
-            & (base_statistics_df["Duration"] >= float(duration_filter))
-        ]
-    filtered_base = filtered_base.reset_index(drop=True)
-    # Extract the timestamps and scale them
-    selected_segments = filtered_base.loc[start_index:end_index, "Timestamp"].tolist()
-    n_segments = len(selected_segments)
-
-    if n_segments == 0:
-        safe_marks = {0: {"label": "No data", "style": {"margin-top": "0px"}}}
-        return safe_marks, 0, [0, 0]
-
-    grouped_segments = []
-
-    for i in range(0, n_segments, group_value):
-        current_group = selected_segments[i : i + group_value]
-        if len(current_group) > 1:
-            grouped_segment = f"{current_group[0]}...{current_group[-1]}"
-        else:
-            grouped_segment = f"{current_group[0]}"
-        grouped_segments.append(grouped_segment)
-
-    marks = {i: {"label": v} for i, v in enumerate(grouped_segments)}
-    max_index = len(grouped_segments) - 1
-
-    # Apply styling depending on the number of marks
-    if max_index <= max_marks:
-        for i in marks:
-            if i % 2 == 0:
-                marks[i]["style"] = {"margin-top": "0px"}
-            else:
-                marks[i]["style"] = {"margin-top": "-35px"}
+    selected_segments = _get_timestamp_segments(
+        lower_filter,
+        duration_filter,
+        use_paraver_mask,
+        start_index,
+        end_index,
+    )
 
     ctx = callback_context
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if (
-        triggered_id == "input-number"
-        or current_values is None
-        or triggered_id in ["lower-filter", "duration-filter", "time-slider", "button-paraver-mask"]
-    ):
-        if len(grouped_segments) < max_dots_auto:
-            if max_index > 0:
-                initial_range = [0, max_index]
-            else:
-                initial_range = [0, 0]
-        else:
-            if max_index > 0:
-                initial_range = [0, min(max_index, 1)]
-            else:
-                initial_range = [0, 0]
+    reset_view = current_values is None or triggered_id in SLIDER_MARKS_CONFIG["value"]["reset_triggers"]
 
-        filtered_marks = {
-            initial_range[0]: marks[initial_range[0]],
-            initial_range[1]: marks[initial_range[1]],
-        }
-
-        if max_index > max_marks:
-            filtered_marks[initial_range[0]]["style"] = {"margin-top": "0px"}
-            filtered_marks[initial_range[1]]["style"] = {"margin-top": "-35px"}
-            return filtered_marks, max_index, initial_range
-        else:
-            return marks, max_index, initial_range
-
-    # Update to only show the first and last marks within the selected range
-    if isinstance(current_values, list) and len(current_values) == 2 and len(grouped_segments) > 1:
-        filtered_marks = {
-            current_values[0]: marks[current_values[0]],
-            current_values[1]: marks[current_values[1]],
-        }
-    elif isinstance(current_values, list) and len(current_values) == 2:
-        # If there is only one item in the range, show it only
-        filtered_marks = {current_values[0]: marks[current_values[0]]}
+    grouped_count = len(_group_slider_segments(selected_segments, group_value)) if selected_segments else 0
+    max_index = max(grouped_count - 1, 0)
+    if grouped_count < max_dots_auto:
+        initial_range = [0, max_index] if max_index > 0 else [0, 0]
     else:
-        # For single value sliders, just show the selected mark
-        filtered_marks = {current_values: marks[current_values]}
+        initial_range = [0, min(max_index, 1)] if max_index > 0 else [0, 0]
 
-    # If more than max_marks, show only these two and style them accordingly
-    if max_index > max_marks:
-        sorted_keys = sorted(filtered_marks.keys())
-        if len(sorted_keys) == 2:
-            filtered_marks[sorted_keys[0]]["style"] = {"margin-top": "0px"}
-            filtered_marks[sorted_keys[1]]["style"] = {"margin-top": "-35px"}
-        return filtered_marks, max_index, current_values
-    else:
-        return marks, max_index, current_values
+    return _resolve_slider_marks_result(
+        selected_segments,
+        group_value=group_value,
+        current_values=current_values,
+        max_marks=max_marks,
+        initial_range=initial_range,
+        reset_view=reset_view,
+    )
 
 
 # Callback to extract the graphs dimensions directly from the component

@@ -278,26 +278,24 @@ def interpolate_color(start_color, end_color, factor):
     return f"rgb({r},{g},{b})"
 
 
-def construct_query(ISA, Precision, Threads, Loads, Stores, Interleaved, DRAMBytes, FPInst, Date):
+def construct_query(filters):
+    field_specs = [
+        ("ISA", True),
+        ("Precision", True),  # string values should be quoted in the query
+        ("Threads", False),  # numeric values should not be quoted
+        ("Loads", False),
+        ("Stores", False),
+        ("Interleaved", True),
+        ("DRAMBytes", False),
+        ("FPInst", True),
+        ("Date", True),
+    ]
+
     query_parts = []
-    if ISA:
-        query_parts.append(f"ISA == '{ISA}'")
-    if Precision:
-        query_parts.append(f"Precision == '{Precision}'")
-    if Threads:
-        query_parts.append(f"Threads == {Threads}")
-    if Loads:
-        query_parts.append(f"Loads == {Loads}")
-    if Stores:
-        query_parts.append(f"Stores == {Stores}")
-    if Interleaved:
-        query_parts.append(f"Interleaved == '{Interleaved}'")
-    if DRAMBytes:
-        query_parts.append(f"DRAMBytes == {DRAMBytes}")
-    if FPInst:
-        query_parts.append(f"FPInst == '{FPInst}'")
-    if Date:
-        query_parts.append(f"Date == '{Date}'")
+    for field_name, quote_value in field_specs:
+        if value := filters.get(field_name):
+            formatted = f"'{value}'" if quote_value else value
+            query_parts.append(f"{field_name} == {formatted}")
 
     return " and ".join(query_parts) if query_parts else None
 
