@@ -166,27 +166,23 @@ intel_performance_counters_mapping = {
 memory_counters = {"Intel_Loads", "Intel_Stores", "Intel_Loads_Stores"}
 fp_counters = {key for key in intel_performance_counters_mapping if key.startswith("Intel_FP_")}
 
+intel_configs_partial = (
+    "FP_Scalar_DP",
+    "FP_SSE_DP",
+    "FP_AVX2_DP",
+    "FP_AVX512_DP",
+    "FP_Scalar_SP",
+    "FP_SSE_SP",
+    "FP_AVX2_SP",
+    "FP_AVX512_SP",
+    "Loads",
+    "Stores",
+)
+
 intel_configs = [
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_Scalar_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_SSE_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_AVX2_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_AVX512_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_Scalar_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_SSE_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_AVX2_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_FP_AVX512_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_Loads.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "Intel", "Intel_Stores.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_Scalar_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_SSE_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX2_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX512_DP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_Scalar_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_SSE_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX2_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_FP_AVX512_SP.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_Loads.cfg"),
-    os.path.join(script_dir, "paraver_carm_configs", "IntelV2", "Intel_Stores.cfg"),
+    os.path.join(script_dir, "paraver_carm_configs", version, f"Intel_{config}.cfg")
+    for version in ["Intel", "IntelV2"]
+    for config in intel_configs_partial
 ]
 
 amd_performance_counters = {
@@ -368,9 +364,7 @@ if not os.path.exists(path):
 
 ok = ut.find_and_run("paramedir")
 if not ok:
-    print(
-        "Paramedir not found, please add the path to Paramedir in your PATH (usually found in the Paraver bin directory)."
-    )
+    print("Paramedir not found, please add Paramedir to your PATH (usually found in the Paraver bin directory).")
     sys.exit(1)
 
 
@@ -526,7 +520,8 @@ if any("DP" in s for s in found_files):
 
 
 missing_msg = (
-    "\nAdd these counters to your XML file to monitor all possible events, \nthese counters should remain in a single counter set:\n\n  "
+    "\nAdd these counters to your XML file to monitor all possible events, \nthese counters should remain in a single "
+    "counter set:\n\n  "
     + "\n  ".join(
         [
             f"{f.replace('_', ' ')} -> {intel_performance_counters_mapping.get(f, 'No mapping found')}"
@@ -2288,7 +2283,10 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
     ut.format_ld_st_csv(color_map_df, roof_labels_filepath)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    metadata_line = f"#{timestamp}:CSV:RUNAPP:{path}:{time_unit}:window_in_code_mode:{color_map_df['percentage'].min()}:{color_map_df['percentage'].max()}"
+    metadata_line = (
+        f"#{timestamp}:CSV:RUNAPP:{path}:{time_unit}:window_in_code_mode:{color_map_df['percentage'].min()}:"
+        f"{color_map_df['percentage'].max()}"
+    )
 
     if trigger_id == "button-carm-ldst-colors":
         csv_df = df[["ThreadID", "Timestamp", "Duration", "Intel_Load_Percent"]]
@@ -3094,8 +3092,7 @@ def analysis(
 
     annotations = {}
     if figure is not None:
-        fig = go.Figure(figure)
-        annotations = fig["layout"]["annotations"]
+        annotations = figure.get("layout", {}).get("annotations", [])
 
     if trigger_id not in ["graphs", "interval-component"]:
         figure = go.Figure()
@@ -3202,18 +3199,16 @@ def analysis(
         ):
             color = select_timestamp_color(point, color_context)
             tooltip_text = ut.build_timestamp_tooltip_text(*build_timestamp_tooltip_args(point, window_name))
-            figure.add_trace(
-                go.Scatter(
-                    **build_timestamp_scatter_trace(
-                        point.ai_value,
-                        point.gflops_value,
-                        trace_name,
-                        dot_size,
-                        color,
-                        tooltip_text,
-                        showlegend,
-                        legendgroup=legendgroup,
-                    )
+            return go.Scatter(
+                **build_timestamp_scatter_trace(
+                    point.ai_value,
+                    point.gflops_value,
+                    trace_name,
+                    dot_size,
+                    color,
+                    tooltip_text,
+                    showlegend,
+                    legendgroup=legendgroup,
                 )
             )
 
@@ -3238,17 +3233,21 @@ def analysis(
                 blend_colors_fn=ut.blend_colors,
                 interpolate_color_fn=ut.interpolate_color,
             )
-            add_timestamp_point_trace(
-                point,
-                color_context,
-                f"{name_app}{extra_average}Timestamps",
-                first,
-                legendgroup="1",
+            figure.add_trace(
+                add_timestamp_point_trace(
+                    point,
+                    color_context,
+                    f"{name_app}{extra_average}Timestamps",
+                    first,
+                    legendgroup="1",
+                )
             )
         # If we are just doing regular plotting
         else:
             first = True
             plabel_aux = set()
+            timestamp_traces = []
+            common_name_prefix = f"{name_app}{extra_average}"
             color_context = TimestampColorContext(
                 use_paraver_colors=use_paraver_colors,
                 color_radio=color_radio,
@@ -3272,12 +3271,17 @@ def analysis(
                     first,
                 )
 
-                add_timestamp_point_trace(
-                    point,
-                    color_context,
-                    f"{name_app}{extra_average}{legend_plabel} Timestamps",
-                    showlegend,
+                timestamp_traces.append(
+                    add_timestamp_point_trace(
+                        point,
+                        color_context,
+                        f"{common_name_prefix}{legend_plabel} Timestamps",
+                        showlegend,
+                    )
                 )
+
+            if timestamp_traces:
+                figure.add_traces(timestamp_traces)
 
     if trigger_id not in ["interval-component"]:
         # If we want to plot the total dot
