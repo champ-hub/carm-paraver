@@ -654,8 +654,6 @@ if color_csv_path != "":
 
     a = "1"
 
-assert isinstance(color_df, DataFrame)
-
 # Calculate metrics for each trace timestamp
 no_flops = 0
 match = 0
@@ -698,10 +696,9 @@ if color_csv_path != "":
         on=["ThreadID", "Timestamp"],
         how="left",
     )
+    del color_df
 else:
     counter_data_df = counter_data_df.copy()
-
-del color_df
 
 for row in counter_data_df.itertuples(index=False):
     # Print progress bar N times and at the end of processing
