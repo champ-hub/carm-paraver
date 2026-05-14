@@ -2,12 +2,14 @@
 
 import argparse
 import copy
+import ctypes
 import datetime
 import errno
 import logging
 import math
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -53,11 +55,21 @@ from analysis_helpers import (
     should_reset_annotations_for_lines,
 )
 
+
+def set_process_death_signal():
+    """Set the process to receive a SIGTERM signal when its parent process dies."""
+    libc = ctypes.CDLL("libc.so.6")
+    PR_PDEATHSIG = 1
+    result = libc.prctl(PR_PDEATHSIG, signal.SIGTERM)
+    if result != 0:
+        raise OSError("prctl failed")
+
+set_process_death_signal()
+
 VERSION = "1.0.0"
 
 # determine a usable port before performing expensive setup
 base_port = int(os.environ.get("CARM_PORT", "8050"))
-original_port = base_port
 max_attempts = 5
 SELECTED_PORT = None
 for _attempt in range(max_attempts):
@@ -88,14 +100,9 @@ if SELECTED_PORT is None:
         file=sys.stderr,
     )
     sys.exit(1)
-elif SELECTED_PORT != original_port:
-    print(
-        f"Using port {SELECTED_PORT}. There is likely an orphaned instance of carm-paraver running. Kill any "
-        f"'python Paraver_CARM.py' processes to use the default port {original_port}."
-    )
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-carm_pathway = os.path.join(script_dir, "carm_results", "roofline")
+carm_results_path = os.path.join(script_dir, "carm_results", "roofline")
 
 # Global Variables
 n_segments = 0
@@ -125,7 +132,7 @@ end_color = (0, 0, 139)  # Dark Blue
 
 
 # CONSTANTS
-scaling_factors = {
+TIME_SCALE_FACTORS = {
     "seconds": 1000000,
     "milliseconds": 1000,
     "microseconds": 1,
@@ -356,7 +363,7 @@ else:
     use_mask_csv = False
     use_paraver_coloring = False
 
-scaling_unit = scaling_factors.get(time_unit.lower(), 1)
+scaling_unit = TIME_SCALE_FACTORS.get(time_unit.lower(), 1)
 
 if not os.path.exists(path):
     print(f"ERROR: The path '{path}' does not exist")
@@ -421,8 +428,8 @@ if path.endswith(".prv") or path.endswith(".gz"):
     print("Paramedir execution finished, calculating CARM metrics.", flush=True)
 
 # Get CARM results
-if os.path.exists(carm_pathway):
-    csv_files = [f for f in os.listdir(carm_pathway) if f.endswith("_roofline.csv")]
+if os.path.exists(carm_results_path):
+    csv_files = [f for f in os.listdir(carm_results_path) if f.endswith("_roofline.csv")]
 else:
     print("ERROR: No CARM results found. Please add them to the ./carm-results/roofline folder.")
     sys.exit(1)
@@ -1458,7 +1465,7 @@ app.layout = dbc.Container(
                         options=[
                             {
                                 "label": machine_name,
-                                "value": os.path.join(carm_pathway, file),
+                                "value": os.path.join(carm_results_path, file),
                             }
                             for machine_name, file in zip(machine_names, csv_files, strict=True)
                         ],
