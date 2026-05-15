@@ -1,0 +1,4 @@
+__pycache__
+*.legend.csv
+.vscode
+notes.md

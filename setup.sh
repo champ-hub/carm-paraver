@@ -3,10 +3,10 @@
 
 set -Eeuo pipefail
 
-die()  { echo "❌ $*" >&2; exit 1; }
-warn() { echo "⚠️  $*" >&2; }
-info() { echo "➤ $*"; }
-ok()   { echo "✅ $*"; }
+die()  { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARNING: $*" >&2; }
+info() { echo "INFO: $*"; }
+ok()   { echo "OK: $*"; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -46,7 +46,15 @@ USAGE
   exit 1
 fi
 
+# convert parameter to absolute path
 PARAMEDIR_DIR="$1"
+if [[ ! "$PARAMEDIR_DIR" = /* ]]; then
+  # relative, make absolute
+  PARAMEDIR_DIR="$(cd "$PARAMEDIR_DIR" && pwd)"
+fi
+
+
+# PARAMEDIR_DIR is already set and normalized above
 PARAMEDIR_BIN="$PARAMEDIR_DIR/paramedir"
 
 info "Checking paramedir at: $PARAMEDIR_BIN"
@@ -78,18 +86,18 @@ fi
 
 cat <<EOF
 
-✅ Setup complete!
+Setup complete!
 
 Steps performed:
   - Verified paramedir at: $PARAMEDIR_BIN: $([[ "$PARAMEDIR_OK" -eq 1 ]] && echo "OK" || echo "FAILED")
   - Updated PATH in: $PROFILE_FILE
-      • Repo root: $REPO_ROOT
-      • paramedir dir: $PARA_LINE
+      * Repo root: $REPO_ROOT
+      * paramedir dir: $PARA_LINE
 
 Next steps:
-  • Open a NEW terminal (or run: source "$PROFILE_FILE") so PATH updates take effect.
-  • Then install Python deps (you might need a virtual environment or the flag --break-system-packages):
+  * Open a NEW terminal (or run: source "$PROFILE_FILE") so PATH updates take effect.
+  * Then install Python deps (you might need a virtual environment or the flag --break-system-packages):
       pip install -r requirements.txt
-  • Run Paraver and launch the CARM GUI from a Paraver timeline or an entire trace.
+  * Run Paraver and launch the CARM GUI from a Paraver timeline or an entire trace.
 
 EOF
