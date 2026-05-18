@@ -232,7 +232,7 @@ def prepare_timestamp_plot_data(
     timestamps_grouper: int,
     timestamp_start_index: int,
     use_accumulate: bool,
-) -> tuple[TimestampPlotData, float | None, float | None]:
+) -> tuple[TimestampPlotData, None | float, None | float]:
     """Build timestamp plotting arrays for average/raw/accumulate modes."""
     local_df = df_filter.copy()
     local_intel_df = df_intel_filter2.copy()
@@ -466,7 +466,7 @@ def prepare_timestamp_series(
     timestamps_grouper: int,
     timestamp_start_index: int,
     use_accumulate: bool,
-) -> tuple[TimestampSeries, float | None, float | None]:
+) -> tuple[TimestampSeries, None | float, None | float]:
     """Build object-based timestamp plotting data with parity to plot-array mode."""
     timestamp_data, min_ai, min_gflops = prepare_timestamp_plot_data(
         df_filter,
@@ -581,7 +581,7 @@ def build_timestamp_scatter_trace(
     color: Any,
     tooltip_text: str,
     showlegend: bool,
-    legendgroup: str | None = None,
+    legendgroup: None | str = None,
 ) -> dict[str, Any]:
     """Build a consistent Scatter trace payload for timestamp points."""
     trace_payload: dict[str, Any] = {
@@ -641,7 +641,7 @@ def calculate_roofline_profile(
     normalize: bool,
     smallest_ai: float,
     calculate_roofline_fn: Callable[[list[Any], float], dict],
-) -> tuple[list[Any], str, dict, float, float] | None:
+) -> None | tuple[list[Any], str, dict, float, float]:
     """Return normalized roofline values and derived line metrics for one profile row."""
     if filtered_df.empty:
         return None
@@ -665,8 +665,8 @@ def resolve_roofline_x_bounds(smallest_ai: float) -> tuple[float, float]:
 
 
 def resolve_roofline_angle_bounds(
-    xaxis_range: list[float] | None,
-    yaxis_range: list[float] | None,
+    xaxis_range: None | list[float],
+    yaxis_range: None | list[float],
     smallest_ai: float,
     dram_start_gflops: float,
     peak_gflops: float,
@@ -690,7 +690,7 @@ def resolve_roofline_angle_bounds(
     return x_min_angle, x_max_angle, y_min_angle, y_max_angle
 
 
-def filter_roofline_df_by_query(df: pd.DataFrame, query: str | None) -> pd.DataFrame:
+def filter_roofline_df_by_query(df: pd.DataFrame, query: None | str) -> pd.DataFrame:
     """Apply a pandas query when provided; otherwise return the original dataframe."""
     return df.query(query) if query else df
 

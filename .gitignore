@@ -2,3 +2,6 @@ __pycache__
 *.legend.csv
 .vscode
 notes.md
+.venv*
+*.egg-info
+dist/

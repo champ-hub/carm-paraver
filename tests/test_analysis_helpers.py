@@ -1,6 +1,6 @@
 import pandas as pd
 
-from analysis_helpers import (
+from carm_paraver.analysis_helpers import (
     TimestampColorContext,
     TimestampPlotData,
     TimestampPoint,
