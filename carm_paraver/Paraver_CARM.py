@@ -66,6 +66,7 @@ def set_process_death_signal():
     if result != 0:
         raise OSError("prctl failed")
 
+
 set_process_death_signal()
 
 VERSION = "1.0.0"
@@ -4009,7 +4010,7 @@ app.clientside_callback(
 )
 
 
-if __name__ == "__main__":
+def run_server() -> None:
     log = logging.getLogger("werkzeug")
     log.setLevel(logging.ERROR)
 
@@ -4039,3 +4040,7 @@ if __name__ == "__main__":
 
     # use run_server for Dash apps (wrapper around Flask.run)
     app.run(debug=False, port=SELECTED_PORT, host=host)
+
+
+if __name__ == "__main__":
+    run_server()
