@@ -53,7 +53,7 @@ export PATH=/path/to/paraver/bin:$PATH
 ### Paraver Trace Requirements
 Avoid labeling regions **with MPI calls inside them**. Focus on labeling regions of pure computation, as MPI calls will prevent region and hardware counter timestamps from matching, which is required for the CARM analysis.
 
-Keep in mind the CARM GUI needs CARM results from the [CARM Tool](https://github.com/champ-hub/carm-roofline) in order to plot Paraver timestamps, this repository includes some example CARM results sourced from the [MareNostrum 5](https://www.bsc.es/supportkc/docs/MareNostrum5/overview/) supercomputer in the carm_results folder. The ability to add additional CARM results will be added soon.
+Keep in mind the CARM GUI needs CARM results from the [CARM Tool](https://github.com/champ-hub/carm-roofline) in order to plot Paraver timestamps; this repository ships a sample MareNostrum 5 roofline CSV that is copied into the user data directory (platformdirs app name "carm") under `roofline/` on first run.
 
 To use the CARM interface, a Paraver/Extrae trace is needed which was instrumented with Intel FP and memory counters such as:
 

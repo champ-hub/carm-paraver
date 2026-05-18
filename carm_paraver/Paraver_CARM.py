@@ -10,12 +10,14 @@ import logging
 import math
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+from importlib import resources
 from typing import Any
 
 import dash
@@ -26,6 +28,7 @@ import dash_daq as daq
 # Run: pip install dash dash-bootstrap-components dash-daq numpy pandas plotly
 # To get all of the Libraries in case requirements.txt method fails
 import pandas as pd
+import platformdirs
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, State, callback_context, dcc, html
 from dash.exceptions import PreventUpdate
@@ -106,7 +109,45 @@ if SELECTED_PORT is None:
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 assets_dir = os.path.join(script_dir, "assets")
-carm_results_path = os.path.join(script_dir, "carm_results", "roofline")
+
+
+def _resolve_roofline_data_dir() -> str:
+    data_dir = platformdirs.user_data_dir("carm", appauthor=False)
+    roofline_dir = os.path.join(data_dir, "roofline")
+    os.makedirs(roofline_dir, exist_ok=True)
+    return roofline_dir
+
+
+def _seed_roofline_data(roofline_dir: str) -> None:
+    if any(name.endswith(".csv") for name in os.listdir(roofline_dir)):
+        return
+
+    sample_ref = resources.files("carm_paraver").joinpath(
+        "sample_data",
+        "roofline",
+        "MN5_roofline.csv",
+    )
+    try:
+        with resources.as_file(sample_ref) as sample_path:
+            shutil.copy2(sample_path, os.path.join(roofline_dir, sample_path.name))
+    except FileNotFoundError:
+        print(
+            "ERROR: bundled MN5 roofline sample is missing; unable to seed data directory.",
+            file=sys.stderr,
+            flush=True,
+        )
+        sys.exit(1)
+    except OSError as exc:
+        print(
+            f"ERROR: unable to seed roofline data in {roofline_dir}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        sys.exit(1)
+
+
+carm_results_path = _resolve_roofline_data_dir()
+_seed_roofline_data(carm_results_path)
 
 # Global Variables
 n_segments = 0
@@ -434,10 +475,13 @@ if prv_trace_path.endswith(".prv") or prv_trace_path.endswith(".gz"):
     print("Paramedir execution finished, calculating CARM metrics.", flush=True)
 
 # Get CARM results
-if os.path.exists(carm_results_path):
-    csv_files = [f for f in os.listdir(carm_results_path) if f.endswith("_roofline.csv")]
-else:
-    print("ERROR: No CARM results found. Please add them to the ./carm-results/roofline folder.")
+csv_files = sorted(f for f in os.listdir(carm_results_path) if f.endswith("_roofline.csv"))
+if not csv_files:
+    print(
+        f"ERROR: No CARM roofline results found in {carm_results_path}. Add files named *_roofline.csv.",
+        file=sys.stderr,
+        flush=True,
+    )
     sys.exit(1)
 
 # Extract machine names from filenames
