@@ -1,48 +1,59 @@
-# carm-paraver
+# CARM-Paraver GUI
 
 This Graphical User Interface was developed to allow for the analysis of [Paraver](https://tools.bsc.es/paraver) traces in the scope of the Cache-Aware Roofline Model (CARM) for floating-point operations. This GUI relies on CARM results obtained via the CARM Tool which can be found in its ([Github repository](https://github.com/champ-hub/carm-roofline)), for instructions on running the CARM Tool please consult the README and other documentation available in its repository. For instruction on running Paraver and obtaining Paraver/Extrae traces please consult the Paraver/Extrae documentation.
 
 # Requirements
-- python (tested with python 3.10.12, 3.12.3)
-    - dash
-    - dash-bootstrap-components
-    - dash-daq
-    - numpy
-    - pandas
-    - plotly
-
+- python (tested with 3.9.25, 3.10.12, 3.12.3)
 - [Paraver](https://tools.bsc.es/downloads)
 
 # How to use
 
+## Installation
+You can install the CARM Paraver GUI through pip:
+```bash
+pip install carm-paraver
+```
+You can also install it from source by cloning this repository and running:
+```bash
+pip install .
+```
+If you have version conflicts with the dependencies, you can use a Python virtual environment to install the package and its dependencies in an isolated environment. To do this, you can run:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install carm-paraver
+```
+If you install in a virtual environment, make sure to run Paraver from the same environment:
+```bash
+source .venv/bin/activate
+wxparaver
+```
+
+## Running
+The GUI is launched via the Paraver interface like so:
+1. Load a Paraver trace with the required counters, and zoom into a section of interest.
+    - **GUI performance is heavily dependent on the time range selected. It is recommended the analysis be focused on a region with a manageable number of events.**
+2. Right click the timeline and select the option to launch the CARM GUI.
+3. Configure the options within the Paraver interface to your liking (these can also be changed within the CARM GUI), and click "Run".
+4. Click the link printed in the Paraver console to open the GUI in your browser.
+
+It is also possible to launch the GUI from outside a Paraver timeline, using the *Run Application* option in the Paraver interface.
+
+If you get any errors, be sure to consult the Setup instructions below.
+
 ## Setup
-The GUI is launched via the Paraver interface, the option to do so can be found by right clicking any Paraver timeline, and then expanding the "Run" dropdown were the CARM option can be selected. This will launch a window within Paraver where you can configure and launch the CARM GUI. These configurations can later be adjusted within the GUI as well.
+
+### Setting up your PATH
+carm-paraver needs `paramedir` to be in your PATH in order to run. To add it, add paraver's bin directory to your PATH. You can make this permanent by appending it to your .bashrc or .bash_profile (change the path accordingly):
+
+```bash
+export PATH=/path/to/paraver/bin:$PATH
+```
 
 ### Paraver Trace Requirements
-Avoid labeling regions **with MPI calls inside them**. Focus on labeling regions of pure computation, as MPI calls will prevent region and hardware counter timestamps from matching, which is required for the CARM analysis. 
+Avoid labeling regions **with MPI calls inside them**. Focus on labeling regions of pure computation, as MPI calls will prevent region and hardware counter timestamps from matching, which is required for the CARM analysis.
 
-### Python Dependencies
-The CARM GUI requires some Python packages to be installed, they can be installed using the requirements.txt file:
-
-```
-pip install -r requirements.txt
-```
-In some cases you might need the flag --break-system-packages or a Python virtual environment (recommended) to install the packages (this is likely the case if you get the error: externally-managed-environment PEP 668).
-
-### Other Dependencies
-Add the path to the root directory of this repository, and the path to Paraver's bin directory to their PATH like so:
-
-```
-export PATH="$PATH:/path/to/repository/carm-paraver"
-export PATH="$PATH:/path/to/Paraver/bin"
-```
-In case you want to keep these folders added to your PATH permanently you can run setup.sh like so:
-```sh
-./setup.sh /path/to/Paraver/bin # relative or absolute paths work
-```
-After these steps Paraver can be launched, and the option to launch CARM from a Paraver timeline should be available.
-
-Keep in mind the CARM GUI needs CARM results from the [CARM Tool](https://github.com/champ-hub/carm-roofline) in order to plot Paraver timestamps, this repository includes some example CARM results sourced from the [MareNostrum 5](https://www.bsc.es/supportkc/docs/MareNostrum5/overview/) supercomputer in the carm_results folder. To add more CARM results simply add the output `<machine>_roofline.csv` files from the CARM Tool to the carm_results folder.
+Keep in mind the CARM GUI needs CARM results from the [CARM Tool](https://github.com/champ-hub/carm-roofline) in order to plot Paraver timestamps, this repository includes some example CARM results sourced from the [MareNostrum 5](https://www.bsc.es/supportkc/docs/MareNostrum5/overview/) supercomputer in the carm_results folder. The ability to add additional CARM results will be added soon.
 
 To use the CARM interface, a Paraver/Extrae trace is needed which was instrumented with Intel FP and memory counters such as:
 
@@ -60,18 +71,22 @@ To use the CARM interface, a Paraver/Extrae trace is needed which was instrument
 | Intel Stores           | `MEM_INST_RETIRED:ALL_STORES`              |
 | Intel Loads and Stores | `MEM_INST_RETIRED:ALL`                     |
 
+In AMD CPUs, the following counters can be used:
+
+| FP/Mem Operation       | AMD Counter                                    |
+| ---------------------- | ---------------------------------------------- |
+| Mul/Add Flops          | `retired_sse_avx_operations:dp_mult_add_flops` |
+| Add/Sub Flops          | `retired_sse_avx_operations:dp_add_sub_flops`  |
+| Mul Flops              | `retired_sse_avx_operations:dp_mult_flops`     |
+| Div Flops              | `retired_sse_avx_operations:dp_div_flops`      |
+| Mul/Add Flops (SP)     | `retired_sse_avx_operations:sp_mult_add_flops` |
+| Add/Sub Flops (SP)     | `retired_sse_avx_operations:sp_add_sub_flops`  |
+| Mul Flops (SP)         | `retired_sse_avx_operations:sp_mult_flops`     |
+| Div Flops (SP)         | `retired_sse_avx_operations:sp_div_flops`      |
+| Loads                  | `ls_dispatch:ld_dispatch`                      |
+| Stores                 | `ls_dispatch:store_dispatch`                   |
 
 At least one FP and one memory counter (separate load and store counters are recommended for a more detailed analysis) must be available in the trace to be analyzed, otherwise the CARM analysis is not possible. It is also recommended to keep all counters in a single counter set (when obtaining the trace via Extrae), this usually allows for all FP counters of a given precision (DP or SP) and the load and store counters. Precisions can also be mixed but the amount of counters used must fit in a single counter set.
-
-## Steps
-
-After performing the setup above, you can:
-
-1. Load a Paraver trace with the required counters, and zoom into a section of interest.
-    - **Processing time is heavily dependent on the time range selected. It is recommended the analysis be focused on a ~50ms section to avoid a long wait.**
-2. Right click the timeline and select the option to launch the CARM GUI.
-3. Configure the options within the Paraver interface to your liking, and click "Run".
-4. Click the link printed in the Paraver console to open the GUI in your browser.
 
 ## Features
 
@@ -107,6 +122,3 @@ Useful options include:
     - Note that this requires the left sidebar option to be set to "Use CARM GUI Colors".
 
 The plot can be configured to normalize the performance roof to the number of threads. The normalized roofs represent the performance per thread, which matches the Paraver timestamps (also per thread). This mode is recommended when relating application performance to the underlying hardware. The non-normalized roofs represent the overall performance of the architecture, and is best for understanding the hardware capabilities.
-
-### Note
-The CARM GUI can also be launched from outside a Paraver timeline, for this click the "Run Application" option (Gear Icon) in the top bar of Paraver.

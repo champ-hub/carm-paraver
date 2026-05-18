@@ -375,7 +375,11 @@ if not os.path.exists(prv_trace_path):
 
 ok = ut.find_and_run("paramedir")
 if not ok:
-    print("Paramedir not found, please add Paramedir to your PATH (usually found in the Paraver bin directory).")
+    print(
+        "Paramedir not found! Add the Paraver bin/ directory to your PATH.\n"
+        "Add the following to your .bashrc or .bash_profile (change the path accordingly):\n"
+        "  export PATH=/path/to/paraver/bin:$PATH"
+    )
     sys.exit(1)
 
 
