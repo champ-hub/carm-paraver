@@ -95,7 +95,7 @@ For best results, when labeling your code with [Extrae events](https://tools.bsc
 
 ## CARM Benchmarking
 
-To benchmark your architecture and display its roofline in the CARM GUI, use the [CARM Tool](https://github.com/champ-hub/carm-roofline). **NOTE: Compatibility between the two tools is in development, more details to come**.
+To benchmark your architecture and display its roofline in the CARM GUI, use the [CARM Tool](https://github.com/champ-hub/carm-roofline). **Note: for compatibility, use the [latest version of the CARM Tool](https://pypi.org/project/carm-roofline/)**
 
 This tool ships a series of sample rooflines from a MareNostrum 5 GPP node.
 
