@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "carm-paraver"
-version = "1.0.0-dev"
+version = "1.0.0.dev0"
 description = "Dash-based CARM analysis for Paraver traces"
 readme = "README.md"
 requires-python = ">=3.9"
