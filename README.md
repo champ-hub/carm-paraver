@@ -38,10 +38,10 @@ export PATH=/path/to/paraver/bin:$PATH
 
 ## Running
 The GUI is launched via the Paraver interface like so:
-1. Use [Extrae](https://github.com/bsc-performance-tools/extrae) to generate a trace with the required counters ([see below how to configure Extrae](#paraver-trace-requirements)).
+1. Use [Extrae](https://github.com/bsc-performance-tools/extrae) to generate a trace with the required counters ([see how to configure Extrae below](#paraver-trace-requirements)).
 2. Load the trace in Paraver, and zoom into a section of interest.
 3. Right click the timeline and select the option to launch the CARM GUI.
-4. Configure the options within the Paraver interface to your liking (see [Launch Configuration](#launch-configuration)), and click "Run".
+4. Configure the options in Paraver to your liking (see [Launch Configuration](#launch-configuration)), and click "Run".
 5. Click the link printed in the Paraver console to open the GUI in your browser.
 
 You will now have the CARM GUI open, showing the architecture's roofline, and the events from the Paraver trace represented as points on the plot. Their position on the roofline, which is determined by their performance and arithmetic intensity, can be used to identify bottlenecks and optimization opportunities for the respective code section. Check the [CARM GUI Features](#carm-gui-features) section for more details about the GUI, and how you can label events and send them back to Paraver for visualization.
@@ -55,7 +55,7 @@ To enable CARM analysis, your Paraver trace needs to include information on the 
 #### Which counters to include?
 Include only the necessary counters for your analysis, so they fit in a single counter set. If too many counters are active, accuracy may be reduced.
 
-Take the application examples below. For each case, see the respective column in the the tables to identify which counters to include in your Extrae configuration.:
+Take the application examples below. For each case, the tables below indicate which counters you should include in your Extrae configuration:
 - **App 1**: The application only uses double precision, but you don't know which vector ISAs it uses.
 - **App 2**: The application is vectorized with AVX2, using both precisions.
 
@@ -95,7 +95,7 @@ For best results, when labeling your code with [Extrae events](https://tools.bsc
 
 ## CARM Benchmarking
 
-To benchmark your architecture and display its roofline in the CARM GUI, use the [CARM Tool](https://github.com/champ-hub/carm-roofline). **NOTE: This feature is still in development**.
+To benchmark your architecture and display its roofline in the CARM GUI, use the [CARM Tool](https://github.com/champ-hub/carm-roofline). **NOTE: Compatibility between the two tools is in development, more details to come**.
 
 This tool ships a series of sample rooflines from a MareNostrum 5 GPP node.
 
