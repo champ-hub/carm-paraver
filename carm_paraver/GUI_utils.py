@@ -362,6 +362,18 @@ def calculate_roofline(values, min_ai):
     FPaidots = [0] * 2
     FPgflopdots = [0] * 2
 
+    try:
+        fp_fma = float(values[5])
+    except (TypeError, ValueError):
+        fp_fma = 0.0
+    try:
+        fp_base = float(values[4])
+    except (TypeError, ValueError):
+        fp_base = 0.0
+
+    # Fall back to non-FMA peak when FP_FMA is missing/zero.
+    fp_peak = fp_fma if fp_fma > 0 else fp_base
+
     ai = np.linspace(min(0.00390625, min_ai), 256, num=200000)
     cache_levels = ["L1", "L2", "L3", "DRAM"]
 
@@ -371,7 +383,7 @@ def calculate_roofline(values, min_ai):
         if values[cache_levels.index(cache_level)] > 0:
             aidots = [0, 0, 0]
             # Compute the first point
-            y_values = carm_eq(ai, values[cache_levels.index(cache_level)], values[5])
+            y_values = carm_eq(ai, values[cache_levels.index(cache_level)], fp_peak)
 
             # Find the point where y_values stops increasing or reaches a plateau
             for i in range(1, len(y_values)):
@@ -531,7 +543,17 @@ def draw_annotation(
 
     if cache_level in cache_levels and values[cache_levels.index(cache_level)] > 0:
         aidots[0] = 0.00390625
-        y_values = carm_eq(ai, values[cache_levels.index(cache_level)], values[5])
+        try:
+            fp_fma = float(values[5])
+        except (TypeError, ValueError):
+            fp_fma = 0.0
+        try:
+            fp_base = float(values[4])
+        except (TypeError, ValueError):
+            fp_base = 0.0
+        fp_peak = fp_fma if fp_fma > 0 else fp_base
+
+        y_values = carm_eq(ai, values[cache_levels.index(cache_level)], fp_peak)
         gflopdots[0] = y_values[0]
         for i in range(1, len(y_values)):
             if y_values[i - 1] == y_values[i]:

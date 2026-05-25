@@ -319,8 +319,14 @@ parser.add_argument("--mask_csv", action="store_true", help="Use mask CSV")
 parser.add_argument("-ac", action="store_true", help="Optional flag for accumulate values mode")
 parser.add_argument("--csv", type=str, required=True, help="Path to the mask CSV")
 parser.add_argument("trace_path", type=str, help="Path to the .prv file")
+parser.add_argument("--debug", "-d", action="store_true", help="Enable debug logging")
 
 args = parser.parse_args()
+
+if args.debug:
+    logging.basicConfig(level=logging.DEBUG)
+
+logging.debug(f"Parsed arguments: {args}")
 
 min_dur = args.min_dur
 use_paraver_coloring = args.color_csv
@@ -772,6 +778,7 @@ for row in counter_data_df.itertuples(index=False):
     processed += 1
     duration = row.Duration * scaling_unit
     timestamp = row.Timestamp
+    # if FLOP counters are all zero or NaN, skip calculations and set metrics to zero/defaults
     if all(pd.isnull(getattr(row, col)) or getattr(row, col) == 0 for col in columns_to_check):
         no_flops += 1
         full_base_statistics["ThreadID"].append(row.ThreadID)
@@ -2079,12 +2086,16 @@ def update_slider_from_csv(
     current_values,
     selected_file,
 ):
+    def prevent_update_for_reason(reason: str):
+        logging.debug(f"Preventing update on update_slider_from_csv: {reason}")
+        raise PreventUpdate
+
     global sync_csv_path
     global current_file_timestamps
     if mask_button_offset == -1:
-        raise PreventUpdate
+        prevent_update_for_reason("Mask button offset is -1.")
     if not selected_file:
-        raise PreventUpdate
+        prevent_update_for_reason("No file selected.")
     else:
         global no_sync
         global first_load
@@ -2093,7 +2104,7 @@ def update_slider_from_csv(
             new_timestamps = [float(csv_df.iloc[0, 0]), float(csv_df.iloc[1, 0])]
         except Exception:
             first_load += 1
-            raise PreventUpdate from None
+            new_timestamps = current_file_timestamps
 
         ctx = callback_context
         if not ctx.triggered:
@@ -2101,13 +2112,13 @@ def update_slider_from_csv(
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
         if new_timestamps == current_file_timestamps and trigger_id != "button-paraver-sync":
-            raise PreventUpdate
+            prevent_update_for_reason("Timestamps in CSV have not changed and trigger is not sync button.")
 
         first_load += 1
         current_file_timestamps = new_timestamps
 
         if first_load <= 1:
-            raise PreventUpdate
+            prevent_update_for_reason("First load.")
 
         try:
             start_index = (full_base_statistics_df["Timestamp"] - new_timestamps[0]).abs().idxmin()
@@ -2158,8 +2169,11 @@ def update_slider_from_csv(
 
         new_slider_indices = [int(new_start_index), int(new_end_index)]
 
+        def print_separator():
+            print("-" * 50, flush=True)
+
         if trigger_id == "button-paraver-sync":
-            print("----------------------------------------------", flush=True)
+            print_separator()
             print(
                 "Sync Button Clicked, updating slider to timestamp range {} - {}".format(
                     filtered_base.loc[new_start_index, "Timestamp"],
@@ -2185,12 +2199,12 @@ def update_slider_from_csv(
                     flush=True,
                 )
 
-            print("----------------------------------------------", flush=True)
+            print_separator()
             no_sync = True
             return new_slider_indices, new_slider_indices, new_timestamps
 
         if new_slider_indices != current_values:
-            print("----------------------------------------------", flush=True)
+            print_separator()
             print(
                 "Sync CSV values changed, updating slider to timestamp range {} - {}".format(
                     filtered_base.loc[new_start_index, "Timestamp"],
@@ -2216,7 +2230,7 @@ def update_slider_from_csv(
                     flush=True,
                 )
 
-            print("----------------------------------------------", flush=True)
+            print_separator()
             no_sync = True
             return new_slider_indices, new_slider_indices, new_timestamps
 
@@ -3990,12 +4004,11 @@ def update_slider_marks(
     triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
     reset_view = current_values is None or triggered_id in SLIDER_MARKS_CONFIG["value"]["reset_triggers"]
 
-    grouped_count = len(_group_slider_segments(selected_segments, group_value)) if selected_segments else 0
-    max_index = max(grouped_count - 1, 0)
-    if grouped_count < max_dots_auto:
-        initial_range = [0, max_index] if max_index > 0 else [0, 0]
+    if selected_segments:
+        grouped_count = len(_group_slider_segments(selected_segments, group_value))
+        initial_range = [0, max(grouped_count - 1, 0)]
     else:
-        initial_range = [0, min(max_index, 1)] if max_index > 0 else [0, 0]
+        initial_range = [0, 0]
 
     return _resolve_slider_marks_result(
         selected_segments,
