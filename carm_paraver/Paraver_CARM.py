@@ -596,6 +596,7 @@ if memory_counters <= missing_files:
             flush=True,
         )
     no_mem = True
+    sys.exit(1)
 
 # Check if all FP (floating point) counters are missing
 if fp_counters <= missing_files:
@@ -611,8 +612,6 @@ if fp_counters <= missing_files:
         )
     sys.exit(1)
 
-if no_mem:
-    sys.exit(1)
 
 if "Intel_Loads" not in missing_files and "Intel_Stores" not in missing_files and "Intel_Loads_Stores" in missing_files:
     missing_files.remove("Intel_Loads_Stores")
@@ -622,16 +621,16 @@ if any("SP" in s for s in found_files):
 if any("DP" in s for s in found_files):
     dp_counters_available = True
 
-
 missing_msg = (
-    "\nAdd these counters to your XML file to monitor all possible events, \nthese counters should remain in a single "
-    "counter set:\n\n  "
+    "Counters for some events are missing from the trace. If any of the following operations\nare relevant to your "
+    "application, you should add the corresponding counters:\n\n"
     + "\n  ".join(
         [
             f"{f.replace('_', ' ')} -> {intel_performance_counters_mapping.get(f, 'No mapping found')}"
             for f in missing_files
         ]
     )
+    + "\n\nThe analysis will proceed with the available counters.\nSee the documentation for more details."
 )
 
 is_modal_open = len(missing_files) > 0
