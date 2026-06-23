@@ -1627,57 +1627,29 @@ app.layout = dbc.Container(
                                                                 ),
                                                             ],
                                                             style={
-                                                                "display": "inline-block",
-                                                                "width": "770px",
-                                                                "margin": "0px 20px auto 15px",
+                                                                "width": "100%",
+                                                                "margin": "0 10px",
                                                             },
                                                         ),
                                                     ]
                                                 ),
                                                 style={
-                                                    "height": "100px",
+                                                    # "height": "100px",
                                                     "margin": "0px auto 10px auto",
                                                     "padding": "0px",
                                                     "text-align": "center",
+                                                    "flex": "1",
                                                 },
                                             ),
                                             dbc.Card(
                                                 dbc.CardBody(
                                                     [
-                                                        html.Div(
-                                                            [
-                                                                html.P(
-                                                                    f"Execution Timestamps To Plot ({time_unit})",
-                                                                    style={
-                                                                        "textAlign": "center",
-                                                                        "fontWeight": "bold",
-                                                                        "margin": "0 200px",
-                                                                        "margin-top": "-6px",
-                                                                    },
-                                                                ),
-                                                                html.P(
-                                                                    "Grouping",
-                                                                    style={
-                                                                        "textAlign": "center",
-                                                                        "fontWeight": "bold",
-                                                                        "margin": "0 40px",
-                                                                    },
-                                                                ),
-                                                                html.P(
-                                                                    "Average",
-                                                                    style={
-                                                                        "textAlign": "center",
-                                                                        "fontWeight": "bold",
-                                                                        "margin": "0 5px",
-                                                                        "display": "none",
-                                                                    },
-                                                                ),
-                                                            ],
+                                                        html.P(
+                                                            f"Execution Timestamps To Plot ({time_unit})",
                                                             style={
-                                                                "display": "flex",
-                                                                "justify-content": "center",
-                                                                "align-items": "center",
-                                                                "margin-bottom": "10px",
+                                                                "textAlign": "center",
+                                                                "fontWeight": "bold",
+                                                                "margin-top": "-6px",
                                                             },
                                                         ),
                                                         dcc.Store(id="data-points-store"),
@@ -1693,8 +1665,6 @@ app.layout = dbc.Container(
                                                                         "fontSize": "24px",
                                                                         "backgroundColor": "transparent",
                                                                         "cursor": "pointer",
-                                                                        "margin-top": "-22px",
-                                                                        "margin-left": "-30px",
                                                                         "margin-right": "10px",
                                                                     },
                                                                 ),
@@ -1715,9 +1685,17 @@ app.layout = dbc.Container(
                                                                         ),
                                                                     ],
                                                                     style={
-                                                                        "display": "inline-block",
-                                                                        "width": "710px",
+                                                                        "flex": "1",
+                                                                        "min-width": "0",
                                                                         "margin": "0px",
+                                                                    },
+                                                                ),
+                                                                html.Span(
+                                                                    "Grouping",
+                                                                    style={
+                                                                        "fontWeight": "bold",
+                                                                        "marginLeft": "15px",
+                                                                        "whiteSpace": "nowrap",
                                                                     },
                                                                 ),
                                                                 html.Div(
@@ -1747,15 +1725,13 @@ app.layout = dbc.Container(
                                                                     ],
                                                                     style={
                                                                         "display": "inline-block",
-                                                                        "margin-top": "-15px",
-                                                                        "margin-left": "15px",
+                                                                        "margin-left": "5px",
                                                                     },
                                                                 ),
                                                                 dbc.Checkbox(
                                                                     id="average-checkbox",
                                                                     label="",
                                                                     style={
-                                                                        "margin-top": "-15px",
                                                                         "margin-left": "40px",
                                                                         "display": "none",
                                                                     },
@@ -1770,11 +1746,11 @@ app.layout = dbc.Container(
                                                     ]
                                                 ),
                                                 style={
-                                                    "height": "100px",
-                                                    "width": "1070px",
+                                                    # "height": "100px",
                                                     "margin": "0px 10px 10px 10px",
                                                     "padding": "0px",
                                                     "text-align": "center",
+                                                    "flex": "1",
                                                 },
                                             ),
                                         ],

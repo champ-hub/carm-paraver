@@ -3,30 +3,25 @@ body {
 }
 
 
-/* Style for making the slider track thicker and darker */
-.rc-slider-track {
-    height: 11px; /* Thicker track */
-    width: 100px;
-    background-color: #000000; /* Darker track color */
+/* Style for making the slider filled range (track) thicker and darker */
+.dash-slider-range {
+    height: 11px; /* Thicker range */
+    background-color: #000000; /* Darker range color */
 }
 
-
 /* Style for making the slider thumb (handle) thicker and darker */
-.rc-slider-handle {
-    top: 7px;
+.dash-slider-thumb {
     width: 15px; /* Bigger handle width */
     height: 15px; /* Bigger handle height */
     background-color: #333; /* Darker handle color */
     border-color: #333; /* Darker border color for the handle */
 }
-
-.rc-slider-rail {
-    height: 10px; /* Bigger handle height */
-    background-color: #b8b6b6; /* Darker handle color */
-    border-color: #b8b6b6; /* Darker border color for the handle */
+/* Style for making the slider track (rail) thicker and darker */
+.dash-slider-track {
+    height: 10px; /* Thicker track */
+    background-color: #b8b6b6; /* Darker track color */
 }
-
-.rc-slider-dot {
+.dash-slider-dot {
     position: absolute;
     bottom: -2px;
     margin-left: -2px;
@@ -37,9 +32,9 @@ body {
     cursor: pointer;
     border-radius: 50%;
     vertical-align: middle;
-  }
+}
 
-
-.cQJXpB .chrome-picker {
+/* Color picker — remove border-radius rounding */
+.chrome-picker {
     border-radius: 0% !important;
 }
