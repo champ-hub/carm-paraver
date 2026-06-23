@@ -70,6 +70,46 @@ def set_process_death_signal():
         raise OSError("prctl failed")
 
 
+class ProgressBar:
+    """Prints a terminal progress bar that updates in-place, ensuring 100% is printed exactly once."""
+
+    def __init__(self, total: int, bar_width: int = 30):
+        self.total = total
+        self.bar_width = bar_width
+        self._done = False
+
+    def update(self, processed: int) -> None:
+        """Print the progress bar for the given number of processed items.
+
+        When ``processed >= total`` the bar is shown at 100% followed by a
+        newline; subsequent calls are no-ops.
+        """
+        if self._done:
+            return
+
+        if self.total <= 0:
+            return
+
+        if processed >= self.total:
+            self._print(1.0)
+            print()
+            self._done = True
+        else:
+            progress = min(processed / self.total, 0.99)
+            self._print(progress)
+
+    def _print(self, progress: float) -> None:
+        if progress >= 1.0:
+            segments = self.bar_width
+        else:
+            segments = min(math.ceil(self.bar_width * progress), self.bar_width - 1)
+        print(
+            f"[{'#' * segments}{' ' * (self.bar_width - segments)}] {progress * 100:.1f}%",
+            end="\r",
+            flush=True,
+        )
+
+
 set_process_death_signal()
 
 VERSION = "1.0.0"
@@ -739,6 +779,7 @@ rows_chars = len(str(total_rows))
 step = max(1, total_rows // 100) if total_rows > 0 else 1
 prog_bar_width = 30  # Total width of the progress bar
 processed = 0
+bar = ProgressBar(total_rows, prog_bar_width)
 if total_rows > 50_000:
     print(
         f"WARNING: Displaying a large number of rows ({total_rows}) may slow down the UI. Consider zooming "
@@ -765,17 +806,9 @@ else:
     counter_data_df = counter_data_df.copy()
 
 for row in counter_data_df.itertuples(index=False):
-    # Print progress bar N times and at the end of processing
-    if processed % step == 0 or processed == total_rows:
-        # print a progress bar
-        progress = processed / total_rows
-        segments = math.ceil(prog_bar_width * progress)
-        print(
-            f"[{'#' * segments}{' ' * (prog_bar_width - segments)}] {progress * 100:.1f}%",
-            end="\r",
-            flush=True,
-        )
     processed += 1
+    if processed % step == 0 or processed == total_rows:
+        bar.update(processed)
     duration = row.Duration * scaling_unit
     timestamp = row.Timestamp
     # if FLOP counters are all zero or NaN, skip calculations and set metrics to zero/defaults
@@ -915,15 +948,6 @@ for row in counter_data_df.itertuples(index=False):
     intel_statistics2["Intel_Load_Percent"].append(load_percentage)
 
 del counter_data_df
-
-# Finish progress bar
-if total_rows > 0:
-    print(
-        f"[{'#' * prog_bar_width}] {100:.1f}%",
-        end="\r",
-        flush=True,
-    )
-    print()
 
 _runtime = time.time() - _time_start
 print(f"Finished processing {total_rows} rows in {_runtime:.2f} seconds. ")
