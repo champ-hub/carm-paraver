@@ -4096,13 +4096,13 @@ app.clientside_callback(
 
 
 def run_server() -> None:
-    log = logging.getLogger("werkzeug")
-    log.setLevel(logging.ERROR)
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    logging.getLogger("dash.dash").setLevel(logging.ERROR)
 
     # Force the host to a loopback address instead of letting Dash/Flask resolve the local hostname, which seems to
     # cause issues in some distributions.
     host = "127.0.0.1"
-    print(f"Starting Dash app on {host}:{SELECTED_PORT}")
+    print(f"Starting Dash app on http://{host}:{SELECTED_PORT}/")
 
     from werkzeug.middleware.profiler import ProfilerMiddleware
 
