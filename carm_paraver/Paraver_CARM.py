@@ -23,6 +23,7 @@ from typing import Any
 import dash
 import dash_bootstrap_components as dbc
 import dash_daq as daq
+import numpy as np
 
 # Third Party Libraries
 # Run: pip install dash dash-bootstrap-components dash-daq numpy pandas plotly
@@ -108,6 +109,20 @@ class ProgressBar:
             end="\r",
             flush=True,
         )
+
+
+def _carm_btn(label: str, button_id: str, tooltip: str | None = None):
+    """Create a sidebar button with optional Tooltip."""
+    btn = dbc.Button(
+        label,
+        id=button_id,
+        className="mb-2",
+        style={"width": "100%"},
+        n_clicks=0,
+    )
+    if tooltip:
+        return html.Div([btn, dbc.Tooltip(tooltip, target=button_id)])
+    return btn
 
 
 set_process_death_signal()
@@ -1487,64 +1502,31 @@ sidebar2 = dbc.Offcanvas(
             className="mb-2",
             style={"color": "white", "textAlign": "center", "fontSize": "20px"},
         ),
-        html.Div(
-            [
-                dbc.Button(
-                    "Send Roof Labels",
-                    id="button-roof-labels",
-                    className="mb-2",
-                    style={"width": "100%"},
-                    n_clicks=0,
-                ),
-                dbc.Tooltip(
-                    "Labels each timestamp based on which roof is above it (L2, DRAM, etc.)",
-                    target="button-roof-labels",
-                ),
-            ]
+        _carm_btn(
+            "Send Roof Labels",
+            "button-roof-labels",
+            "Labels each timestamp based on which roof is above it (L2, DRAM, etc.)",
         ),
-        html.Div(
-            [
-                dbc.Button(
-                    "Send LD/ST Ratio",
-                    id="button-carm-ldst-colors",
-                    className="mb-2",
-                    style={"width": "100%"},
-                    n_clicks=0,
-                ),
-                dbc.Tooltip(
-                    "Labels each timestamp based on the load-store ratio",
-                    target="button-carm-ldst-colors",
-                ),
-            ]
+        _carm_btn(
+            "Send LD/ST Ratio",
+            "button-carm-ldst-colors",
+            "Labels each timestamp based on the load-store ratio",
         ),
-        html.Div(
-            [
-                dbc.Button(
-                    "Send SP/DP Ratio",
-                    id="button-carm-spdp-colors",
-                    className="mb-2",
-                    style={"width": "100%"},
-                    n_clicks=0,
-                ),
-                dbc.Tooltip(
-                    "Labels each timestamp based on the single-precision/double-precision ratio",
-                    target="button-carm-spdp-colors",
-                ),
-            ]
+        _carm_btn(
+            "Send SP/DP Ratio",
+            "button-carm-spdp-colors",
+            "Labels each timestamp based on the single-precision/double-precision ratio",
         ),
-        dbc.Button(
-            "Send Arithmetic Performance",
-            id="button-carm-gflops",
-            className="mb-2",
-            style={"width": "100%"},
-            n_clicks=0,
+        _carm_btn("Send Performance", "button-carm-gflops", "Labels each timestamp based on the GFLOPS performance"),
+        _carm_btn(
+            "Send Arithmetic Intensity", "button-carm-ai", "Labels each timestamp based on the arithmetic intensity"
         ),
-        dbc.Button(
-            "Send Arithmetic Intensity",
-            id="button-carm-ai",
-            className="mb-2",
-            style={"width": "100%"},
-            n_clicks=0,
+        _carm_btn(
+            "Send Roof Proximity",
+            "button-carm-roof-proximity",
+            "Labels each timestamp based on its proximity to each of the roofs. e.g. 0.2 relative to the L1 means a "
+            "perfectly optimization could achieve a 5x speedup. A value of 1.0 means the timestamp is at or above the "
+            "roof.",
         ),
     ],
     id="offcanvas2",
@@ -2500,6 +2482,90 @@ def generate_ai_csv(n_clicks, lines):
         csv_df.to_csv(f, index=False, header=False, sep="\t")
 
     print("carm_ai.csv file written.", flush=True)
+
+    return
+
+
+@app.callback(
+    Input("button-carm-roof-proximity", "n_clicks"),
+    Input("graph-lines", "data"),
+    prevent_initial_call=True,
+)
+def generate_roof_proximity_csv(n_clicks, lines):
+    global full_base_statistics_df, prv_trace_path, time_unit
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger_id != "button-carm-roof-proximity":
+        raise PreventUpdate
+
+    if lines is None:
+        print("Graph lines data is None, cannot generate roof proximity CSV.", flush=True)
+        return
+
+    df: pd.DataFrame = full_base_statistics_df.copy()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    output_dir = os.path.dirname(prv_trace_path)
+
+    ai = df["Arithmetic_Intensity"].values
+    perf = df["GFLOPS"].values
+
+    level_names = {"L1": "l1", "L2": "l2", "L3": "l3", "DRAM": "dram"}
+
+    for level, suffix in level_names.items():
+        if level not in lines:
+            continue
+
+        roof = lines[level]
+        start_x, start_y = roof["start"]
+        ridge_x, ridge_y = roof["ridge"]
+        end_x, end_y = roof["end"]
+
+        roof_vals = np.zeros_like(ai)
+
+        left = ai <= ridge_x
+        if np.any(left):
+            if ridge_x == start_x:
+                roof_vals[left] = start_y
+            else:
+                slope = (ridge_y - start_y) / (ridge_x - start_x)
+                roof_vals[left] = start_y + slope * (ai[left] - start_x)
+
+        right = ai > ridge_x
+        if np.any(right):
+            if end_x == ridge_x:
+                roof_vals[right] = ridge_y
+            else:
+                slope = (end_y - ridge_y) / (end_x - ridge_x)
+                roof_vals[right] = ridge_y + slope * (ai[right] - ridge_x)
+
+        valid = (ai > 0) & (perf > 0) & (roof_vals > 0)
+        ratios = np.where(valid, np.minimum(perf / roof_vals, 1.0), 0.0)
+
+        metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:0.0:1.0"
+
+        rel_df = pd.DataFrame(
+            {
+                "ThreadID": df["ThreadID"],
+                "Timestamp": df["Timestamp"],
+                "Duration": df["Duration"],
+                "Ratio": ratios,
+            }
+        )
+        rel_df["Ratio"] = rel_df["Ratio"].apply(lambda x: f"{x:.10f}")
+        rel_df = rel_df.sort_values(
+            ["ThreadID", "Timestamp"],
+            key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
+        )
+
+        csv_filepath = os.path.join(output_dir, f"carm_rel_{suffix}.csv")
+        with open(csv_filepath, "w") as f:
+            f.write(metadata_line + "\n")
+            rel_df.to_csv(f, index=False, header=False, sep="\t")
+
+        print(f"carm_rel_{suffix}.csv file written.", flush=True)
 
     return
 
