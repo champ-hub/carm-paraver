@@ -1487,23 +1487,55 @@ sidebar2 = dbc.Offcanvas(
             className="mb-2",
             style={"color": "white", "textAlign": "center", "fontSize": "20px"},
         ),
+        html.Div([
+            dbc.Button(
+                "Send Roof Labels",
+                id="button-roof-labels",
+                className="mb-2",
+                style={"width": "100%"},
+                n_clicks=0,
+            ),
+            dbc.Tooltip(
+                "Labels each timestamp based on which roof is above it (L2, DRAM, etc.)",
+                target="button-roof-labels",
+            )
+        ]),
+        html.Div([
+            dbc.Button(
+                "Send LD/ST Ratio",
+                id="button-carm-ldst-colors",
+                className="mb-2",
+                style={"width": "100%"},
+                n_clicks=0,
+            ),
+            dbc.Tooltip(
+                "Labels each timestamp based on the load-store ratio",
+                target="button-carm-ldst-colors",
+            )
+        ]),
+        html.Div([
+            dbc.Button(
+                "Send SP/DP Ratio",
+                id="button-carm-spdp-colors",
+                className="mb-2",
+                style={"width": "100%"},
+                n_clicks=0,
+            ),
+            dbc.Tooltip(
+                "Labels each timestamp based on the single-precision/double-precision ratio",
+                target="button-carm-spdp-colors",
+            )
+        ]),
         dbc.Button(
-            "Send Timestamps Roof Labels",
-            id="button-roof-labels",
+            "Send Arithmetic Performance",
+            id="button-carm-gflops",
             className="mb-2",
             style={"width": "100%"},
             n_clicks=0,
         ),
         dbc.Button(
-            "Send Timestamps LD/ST Percentage Colors",
-            id="button-carm-ldst-colors",
-            className="mb-2",
-            style={"width": "100%"},
-            n_clicks=0,
-        ),
-        dbc.Button(
-            "Send Timestamps SP/DP Percentage Colors",
-            id="button-carm-spdp-colors",
+            "Send Arithmetic Intensity",
+            id="button-carm-ai",
             className="mb-2",
             style={"width": "100%"},
             n_clicks=0,
@@ -2372,6 +2404,97 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
         csv_df.to_csv(f, index=False, header=False, sep="\t")
 
     print("carm_colors.csv file written.", flush=True)
+
+    return
+
+@app.callback(
+    Input("button-carm-gflops", "n_clicks"),
+    Input("graph-lines", "data"),
+    prevent_initial_call=True,
+)
+def generate_gflops_csv(n_clicks, lines):
+    global full_base_statistics_df, prv_trace_path, time_unit
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger_id != "button-carm-gflops":
+        raise PreventUpdate
+
+    if lines is None:
+        print("Graph lines data is None, cannot generate GFLOPS CSV.", flush=True)
+        return
+
+    df: pd.DataFrame = full_base_statistics_df.copy()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    min_gflops = df["GFLOPS"].min()
+    max_gflops = df["GFLOPS"].max()
+    metadata_line = (
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:"
+        f"{min_gflops}:{max_gflops}"
+    )
+
+    csv_df = df[["ThreadID", "Timestamp", "Duration", "GFLOPS"]].copy()
+    csv_df["GFLOPS"] = csv_df["GFLOPS"].apply(lambda x: f"{x:.10f}")
+    csv_df = csv_df.sort_values(
+        ["ThreadID", "Timestamp"],
+        key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
+    )
+
+    output_dir = os.path.dirname(prv_trace_path)
+    csv_filepath = os.path.join(output_dir, "carm_gflops.csv")
+    with open(csv_filepath, "w") as f:
+        f.write(metadata_line + "\n")
+        csv_df.to_csv(f, index=False, header=False, sep="\t")
+
+    print("carm_gflops.csv file written.", flush=True)
+
+    return
+
+
+@app.callback(
+    Input("button-carm-ai", "n_clicks"),
+    Input("graph-lines", "data"),
+    prevent_initial_call=True,
+)
+def generate_ai_csv(n_clicks, lines):
+    global full_base_statistics_df, prv_trace_path, time_unit
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger_id != "button-carm-ai":
+        raise PreventUpdate
+
+    if lines is None:
+        print("Graph lines data is None, cannot generate AI CSV.", flush=True)
+        return
+
+    df: pd.DataFrame = full_base_statistics_df.copy()
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    min_ai = df["Arithmetic_Intensity"].min()
+    max_ai = df["Arithmetic_Intensity"].max()
+    metadata_line = (
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:"
+        f"{min_ai}:{max_ai}"
+    )
+
+    csv_df = df[["ThreadID", "Timestamp", "Duration", "Arithmetic_Intensity"]].copy()
+    csv_df["Arithmetic_Intensity"] = csv_df["Arithmetic_Intensity"].apply(lambda x: f"{x:.10f}")
+    csv_df = csv_df.sort_values(
+        ["ThreadID", "Timestamp"],
+        key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
+    )
+
+    output_dir = os.path.dirname(prv_trace_path)
+    csv_filepath = os.path.join(output_dir, "carm_ai.csv")
+    with open(csv_filepath, "w") as f:
+        f.write(metadata_line + "\n")
+        csv_df.to_csv(f, index=False, header=False, sep="\t")
+
+    print("carm_ai.csv file written.", flush=True)
 
     return
 
