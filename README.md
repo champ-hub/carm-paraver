@@ -2,6 +2,8 @@
 
 This GUI allows the analysis of [Paraver](https://tools.bsc.es/paraver) traces on the Cache-Aware Roofline Model (CARM) for floating-point operations. It can be launched from the Paraver interface and send labeled events back to Paraver for visualization.
 
+The CARM allows for roofline analysis of your application, displaying its computational bursts as points on the roofline. This can be used to identify bottlenecks and optimization opportunities for the respective code section. Points on the memory-bound or the compute-bound sections of the roof benefit from different optimization strategies, and the distance of your points to the roofline can be used to identify how much performance can be gained by optimizing your code.
+
 # Requirements
 - Python (tested with 3.9.25, 3.10.12, 3.12.3)
 - [Paraver, Extrae](https://tools.bsc.es/downloads)
