@@ -1487,45 +1487,51 @@ sidebar2 = dbc.Offcanvas(
             className="mb-2",
             style={"color": "white", "textAlign": "center", "fontSize": "20px"},
         ),
-        html.Div([
-            dbc.Button(
-                "Send Roof Labels",
-                id="button-roof-labels",
-                className="mb-2",
-                style={"width": "100%"},
-                n_clicks=0,
-            ),
-            dbc.Tooltip(
-                "Labels each timestamp based on which roof is above it (L2, DRAM, etc.)",
-                target="button-roof-labels",
-            )
-        ]),
-        html.Div([
-            dbc.Button(
-                "Send LD/ST Ratio",
-                id="button-carm-ldst-colors",
-                className="mb-2",
-                style={"width": "100%"},
-                n_clicks=0,
-            ),
-            dbc.Tooltip(
-                "Labels each timestamp based on the load-store ratio",
-                target="button-carm-ldst-colors",
-            )
-        ]),
-        html.Div([
-            dbc.Button(
-                "Send SP/DP Ratio",
-                id="button-carm-spdp-colors",
-                className="mb-2",
-                style={"width": "100%"},
-                n_clicks=0,
-            ),
-            dbc.Tooltip(
-                "Labels each timestamp based on the single-precision/double-precision ratio",
-                target="button-carm-spdp-colors",
-            )
-        ]),
+        html.Div(
+            [
+                dbc.Button(
+                    "Send Roof Labels",
+                    id="button-roof-labels",
+                    className="mb-2",
+                    style={"width": "100%"},
+                    n_clicks=0,
+                ),
+                dbc.Tooltip(
+                    "Labels each timestamp based on which roof is above it (L2, DRAM, etc.)",
+                    target="button-roof-labels",
+                ),
+            ]
+        ),
+        html.Div(
+            [
+                dbc.Button(
+                    "Send LD/ST Ratio",
+                    id="button-carm-ldst-colors",
+                    className="mb-2",
+                    style={"width": "100%"},
+                    n_clicks=0,
+                ),
+                dbc.Tooltip(
+                    "Labels each timestamp based on the load-store ratio",
+                    target="button-carm-ldst-colors",
+                ),
+            ]
+        ),
+        html.Div(
+            [
+                dbc.Button(
+                    "Send SP/DP Ratio",
+                    id="button-carm-spdp-colors",
+                    className="mb-2",
+                    style={"width": "100%"},
+                    n_clicks=0,
+                ),
+                dbc.Tooltip(
+                    "Labels each timestamp based on the single-precision/double-precision ratio",
+                    target="button-carm-spdp-colors",
+                ),
+            ]
+        ),
         dbc.Button(
             "Send Arithmetic Performance",
             id="button-carm-gflops",
@@ -2407,6 +2413,7 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
 
     return
 
+
 @app.callback(
     Input("button-carm-gflops", "n_clicks"),
     Input("graph-lines", "data"),
@@ -2431,8 +2438,7 @@ def generate_gflops_csv(n_clicks, lines):
     min_gflops = df["GFLOPS"].min()
     max_gflops = df["GFLOPS"].max()
     metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:"
-        f"{min_gflops}:{max_gflops}"
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:{min_gflops}:{max_gflops}"
     )
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "GFLOPS"]].copy()
@@ -2477,8 +2483,7 @@ def generate_ai_csv(n_clicks, lines):
     min_ai = df["Arithmetic_Intensity"].min()
     max_ai = df["Arithmetic_Intensity"].max()
     metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:"
-        f"{min_ai}:{max_ai}"
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:{min_ai}:{max_ai}"
     )
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "Arithmetic_Intensity"]].copy()
