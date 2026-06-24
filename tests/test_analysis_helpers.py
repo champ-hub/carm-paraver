@@ -5,6 +5,7 @@ from carm_paraver.analysis_helpers import (
     TimestampPlotData,
     TimestampPoint,
     TimestampSeries,
+    WindowMode,
     build_timestamp_scatter_trace,
     build_timestamp_tooltip_args,
     calculate_roofline_profile,
@@ -429,6 +430,71 @@ def test_resolve_timestamp_legend_state_without_paraver_colors() -> None:
     assert label == ""
     assert next_first is False
     assert seen == {"A"}
+
+
+def test_resolve_timestamp_legend_state_paraver_colors_gradient_mode() -> None:
+    """With use_paraver_colors=True and gradient mode, only first point gets legend."""
+    seen = set()
+    showlegend, label, next_first = resolve_timestamp_legend_state(
+        True,
+        "A",
+        seen,
+        True,
+        window_mode=WindowMode.GRADIENT,
+    )
+    assert showlegend is True
+    assert label == ""
+    assert next_first is False
+    assert seen == set()
+
+    # Second point with different label should still not get a legend entry
+    showlegend, label, next_first = resolve_timestamp_legend_state(
+        True,
+        "B",
+        seen,
+        False,
+        window_mode=WindowMode.GRADIENT,
+    )
+    assert showlegend is False
+    assert label == ""
+    assert next_first is False
+    assert seen == set()
+
+
+def test_resolve_timestamp_legend_state_paraver_colors_code_mode_full_legend() -> None:
+    """With use_paraver_colors=True and code mode, each unique plabel gets a legend entry."""
+    seen = set()
+    showlegend, label, next_first = resolve_timestamp_legend_state(
+        True,
+        "X",
+        seen,
+        False,
+        window_mode=WindowMode.CODE,
+    )
+    assert showlegend is True  # first time seeing "X"
+    assert label == "X"
+    assert next_first is False
+    assert seen == {"X"}
+
+    # Same label again should not get a legend entry
+    showlegend, label, next_first = resolve_timestamp_legend_state(
+        True,
+        "X",
+        seen,
+        False,
+        window_mode=WindowMode.CODE,
+    )
+    assert showlegend is False
+    assert seen == {"X"}
+
+
+def test_resolve_timestamp_legend_state_default_is_code_mode() -> None:
+    """Default window_mode should be CODE (backward compatible)."""
+    seen = set()
+    showlegend, label, _next_first = resolve_timestamp_legend_state(True, "D", seen, True)
+    assert showlegend is True
+    assert label == "D"
+    assert seen == {"D"}
 
 
 def test_should_reset_annotations_for_lines_respects_interval_trigger() -> None:

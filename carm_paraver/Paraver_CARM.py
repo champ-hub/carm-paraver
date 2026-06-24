@@ -39,6 +39,7 @@ from pandas import DataFrame
 from . import GUI_utils as ut
 from .analysis_helpers import (
     TimestampColorContext,
+    WindowMode,
     build_timestamp_scatter_trace,
     build_timestamp_tooltip_args,
     calculate_roofline_profile,
@@ -429,6 +430,11 @@ if mask_csv_path != "" and mask_csv_path.endswith(".csv"):
     prv_filename = os.path.basename(parts[3])
     prv_stem = os.path.splitext(prv_filename)[0]
 
+    window_mode_str = parts[5] if len(parts) > 5 else "window_in_code_mode"
+    if window_mode_str == WindowMode.GRADIENT.value:
+        window_mode = WindowMode.GRADIENT
+    else:
+        window_mode = WindowMode.CODE
     time_unit = parts[4] if len(parts) > 4 else "Unknown"
 
     if legend_filename.endswith(".legend.csv"):
@@ -468,6 +474,7 @@ else:
     time_unit = "Microseconds"
     use_mask_csv = False
     use_paraver_coloring = False
+    window_mode = WindowMode.CODE
 
 scaling_unit = TIME_SCALE_FACTORS.get(time_unit.lower(), 1)
 
@@ -2276,7 +2283,7 @@ def generate_csv(n_clicks, lines):
     df: pd.DataFrame = full_base_statistics_df.copy()
     df["Roof Label"] = df.apply(lambda row: ut.label_cache_level(row, lines), axis=1)
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_code_mode:1:6"
+    metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.CODE.value}:1:6"
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "Roof Label"]]
     # natural sort on the thread ID column so values like "1.1.10" come after
@@ -2373,7 +2380,7 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_code_mode:{color_map_df['percentage'].min()}:"
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.CODE.value}:{color_map_df['percentage'].min()}:"
         f"{color_map_df['percentage'].max()}"
     )
 
@@ -2420,7 +2427,7 @@ def generate_gflops_csv(n_clicks, lines):
     min_gflops = df["GFLOPS"].min()
     max_gflops = df["GFLOPS"].max()
     metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:{min_gflops}:{max_gflops}"
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.GRADIENT.value}:{min_gflops}:{max_gflops}"
     )
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "GFLOPS"]].copy()
@@ -2465,7 +2472,7 @@ def generate_ai_csv(n_clicks, lines):
     min_ai = df["Arithmetic_Intensity"].min()
     max_ai = df["Arithmetic_Intensity"].max()
     metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:{min_ai}:{max_ai}"
+        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.GRADIENT.value}:{min_ai}:{max_ai}"
     )
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "Arithmetic_Intensity"]].copy()
@@ -2544,7 +2551,7 @@ def generate_roof_proximity_csv(n_clicks, lines):
         valid = (ai > 0) & (perf > 0) & (roof_vals > 0)
         ratios = np.where(valid, np.minimum(perf / roof_vals, 1.0), 0.0)
 
-        metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:window_in_null_gradient_mode:0.0:1.0"
+        metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.GRADIENT.value}:0.0:1.0"
 
         rel_df = pd.DataFrame(
             {
@@ -3532,6 +3539,7 @@ def analysis(
                     point.plabel,
                     plabel_aux,
                     first,
+                    window_mode,
                 )
 
                 timestamp_traces.append(

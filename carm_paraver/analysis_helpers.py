@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 import pandas as pd
 
 BLEND_COLOR_MODES = ("ISA", "Precision", "LD/ST Percentage", "Thread ID")
 ROOFLINE_X_MIN_DEFAULT = 1.0 / 256.0
+
+
+class WindowMode(Enum):
+    CODE = "window_in_code_mode"
+    GRADIENT = "window_in_null_gradient_mode"
+
+
 ROOFLINE_X_MAX_DEFAULT = 256.0
 
 
@@ -604,9 +612,14 @@ def resolve_timestamp_legend_state(
     plabel: str,
     seen_paraver_labels: set[str],
     first_non_paraver: bool,
+    window_mode: WindowMode = WindowMode.CODE,
 ) -> tuple[bool, str, bool]:
-    """Resolve showlegend/display label and next non-paraver state for timestamp points."""
-    if use_paraver_colors:
+    """Resolve showlegend/display label and next non-paraver state for timestamp points.
+
+    When using Paraver colors in code mode, each unique plabel gets its own legend entry.
+    In gradient mode (or when using CARM colors), only the first point gets a legend entry.
+    """
+    if use_paraver_colors and window_mode == WindowMode.CODE:
         showlegend = plabel not in seen_paraver_labels
         seen_paraver_labels.add(plabel)
         return showlegend, plabel, first_non_paraver
