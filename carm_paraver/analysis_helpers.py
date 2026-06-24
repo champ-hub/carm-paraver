@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -905,3 +906,30 @@ def build_timestamp_tooltip_args(*args, **kwargs) -> tuple[Any, ...]:
         return build_timestamp_tooltip_args(point, kwargs.get("window_name"))
 
     return _build_timestamp_tooltip_args_scalar(*args, **kwargs)
+
+
+def build_csv_metadata_line(
+    prv_trace_path: str,
+    time_unit: str,
+    window_mode: WindowMode,
+    vmin: float,
+    vmax: float,
+) -> str:
+    """Format the Paraver-compatible CSV header line with timestamp and metadata."""
+    ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    return f"#{ts}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{window_mode.value}:{vmin}:{vmax}"
+
+
+def sort_timestamp_df(df: pd.DataFrame, natural_sort_fn: Callable) -> pd.DataFrame:
+    """Sort by ThreadID (natural order) then Timestamp."""
+    return df.sort_values(
+        ["ThreadID", "Timestamp"],
+        key=lambda col: natural_sort_fn(col) if col.name == "ThreadID" else col,
+    )
+
+
+def write_csv_file(csv_df: pd.DataFrame, filepath: str, metadata_line: str) -> None:
+    """Write the tab-separated CSV with Paraver header line."""
+    with open(filepath, "w") as f:
+        f.write(metadata_line + "\n")
+        csv_df.to_csv(f, index=False, header=False, sep="\t")

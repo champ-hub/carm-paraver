@@ -40,6 +40,7 @@ from . import GUI_utils as ut
 from .analysis_helpers import (
     TimestampColorContext,
     WindowMode,
+    build_csv_metadata_line,
     build_timestamp_scatter_trace,
     build_timestamp_tooltip_args,
     calculate_roofline_profile,
@@ -60,6 +61,8 @@ from .analysis_helpers import (
     select_timestamp_color,
     should_plot_timestamp_point,
     should_reset_annotations_for_lines,
+    sort_timestamp_df,
+    write_csv_file,
 )
 
 
@@ -1532,8 +1535,8 @@ sidebar2 = dbc.Offcanvas(
             "Send Roof Proximity",
             "button-carm-roof-proximity",
             "Labels each timestamp based on its proximity to each of the roofs. e.g. 0.2 relative to the L1 means a "
-            "perfectly optimization could achieve a 5x speedup. A value of 1.0 means the timestamp is at or above the "
-            "roof.",
+            "perfect optimization would achieve a 5x speedup. A value of 1.0 means the timestamp is at or above the "
+            "performance roof.",
         ),
     ],
     id="offcanvas2",
@@ -2282,22 +2285,14 @@ def generate_csv(n_clicks, lines):
 
     df: pd.DataFrame = full_base_statistics_df.copy()
     df["Roof Label"] = df.apply(lambda row: ut.label_cache_level(row, lines), axis=1)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.CODE.value}:1:6"
+
+    header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.CODE, 1, 6)
 
     csv_df = df[["ThreadID", "Timestamp", "Duration", "Roof Label"]]
-    # natural sort on the thread ID column so values like "1.1.10" come after
-    # "1.1.2" instead of being ordered lexicographically.
-    csv_df = csv_df.sort_values(
-        ["ThreadID", "Timestamp"],
-        key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
-    )
+    csv_df = sort_timestamp_df(csv_df, ut.natural_sort_series)
 
     output_dir = os.path.dirname(prv_trace_path)
-    roof_csv_filepath = os.path.join(output_dir, "carm_roofs.csv")
-    with open(roof_csv_filepath, "w") as f:
-        f.write(metadata_line + "\n")
-        csv_df.to_csv(f, index=False, header=False, sep="\t")
+    write_csv_file(csv_df, os.path.join(output_dir, "carm_roofs.csv"), header)
 
     roof_labels_filepath = os.path.join(output_dir, "carm_roofs.legend.csv")
     labels_data = [
@@ -2313,8 +2308,6 @@ def generate_csv(n_clicks, lines):
             label_line = f'{row[0]} "{row[1]}",{row[2]},{row[3]},{row[4]}\n'
             f.write(label_line)
     print("carm_roofs.csv file written.", flush=True)
-
-    return
 
 
 @app.callback(
@@ -2375,122 +2368,78 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
 
     color_map_df = pd.DataFrame(color_map)
     output_dir = os.path.dirname(prv_trace_path)
-    roof_labels_filepath = os.path.join(output_dir, "carm_colors.legend.csv")
-    ut.format_ld_st_csv(color_map_df, roof_labels_filepath)
+    ut.format_ld_st_csv(color_map_df, os.path.join(output_dir, "carm_colors.legend.csv"))
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.CODE.value}:{color_map_df['percentage'].min()}:"
-        f"{color_map_df['percentage'].max()}"
+    header = build_csv_metadata_line(
+        prv_trace_path,
+        time_unit,
+        WindowMode.CODE,
+        color_map_df["percentage"].min(),
+        color_map_df["percentage"].max(),
     )
 
-    if trigger_id == "button-carm-ldst-colors":
-        csv_df = df[["ThreadID", "Timestamp", "Duration", "Intel_Load_Percent"]]
-    elif trigger_id == "button-carm-spdp-colors":
-        csv_df = df[["ThreadID", "Timestamp", "Duration", "Intel_FP_DP_Percent"]]
-    csv_df = csv_df.sort_values(
-        ["ThreadID", "Timestamp"],
-        key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
-    )
-
-    roof_csv_filepath = os.path.join(output_dir, "carm_colors.csv")
-    with open(roof_csv_filepath, "w") as f:
-        f.write(metadata_line + "\n")
-        csv_df.to_csv(f, index=False, header=False, sep="\t")
-
+    value_col = "Intel_Load_Percent" if trigger_id == "button-carm-ldst-colors" else "Intel_FP_DP_Percent"
+    csv_df = sort_timestamp_df(df[["ThreadID", "Timestamp", "Duration", value_col]], ut.natural_sort_series)
+    write_csv_file(csv_df, os.path.join(output_dir, "carm_colors.csv"), header)
     print("carm_colors.csv file written.", flush=True)
 
-    return
+
+def _register_metric_csv(button_id, value_col, filename, window_mode, format_spec=None):
+    """Register a Dash callback that exports a single-column metric CSV.
+
+    Handles the standard guard pattern, metadata header, sort, and file write.
+    """
+
+    @app.callback(
+        Input(button_id, "n_clicks"),
+        Input("graph-lines", "data"),
+        prevent_initial_call=True,
+    )
+    def _inner(n_clicks, lines):
+        global full_base_statistics_df, prv_trace_path, time_unit
+        ctx = callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if trigger_id != button_id:
+            raise PreventUpdate
+        if lines is None:
+            print(f"Graph lines data is None, cannot generate {filename}.", flush=True)
+            return
+
+        df = full_base_statistics_df.copy()
+        vmin = df[value_col].min()
+        vmax = df[value_col].max()
+        header = build_csv_metadata_line(prv_trace_path, time_unit, window_mode, vmin, vmax)
+
+        csv_df = df[["ThreadID", "Timestamp", "Duration", value_col]].copy()
+        if format_spec:
+            csv_df[value_col] = csv_df[value_col].apply(lambda x: f"{x:{format_spec}}")
+        csv_df = sort_timestamp_df(csv_df, ut.natural_sort_series)
+
+        output_dir = os.path.dirname(prv_trace_path)
+        write_csv_file(csv_df, os.path.join(output_dir, filename), header)
+        print(f"{filename} written.", flush=True)
+
+    return _inner
 
 
-@app.callback(
-    Input("button-carm-gflops", "n_clicks"),
-    Input("graph-lines", "data"),
-    prevent_initial_call=True,
+_register_metric_csv(
+    "button-carm-gflops",
+    "GFLOPS",
+    "carm_gflops.csv",
+    WindowMode.GRADIENT,
+    format_spec=".10f",
 )
-def generate_gflops_csv(n_clicks, lines):
-    global full_base_statistics_df, prv_trace_path, time_unit
-    ctx = callback_context
-    if not ctx.triggered:
-        raise PreventUpdate
-
-    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trigger_id != "button-carm-gflops":
-        raise PreventUpdate
-
-    if lines is None:
-        print("Graph lines data is None, cannot generate GFLOPS CSV.", flush=True)
-        return
-
-    df: pd.DataFrame = full_base_statistics_df.copy()
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    min_gflops = df["GFLOPS"].min()
-    max_gflops = df["GFLOPS"].max()
-    metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.GRADIENT.value}:{min_gflops}:{max_gflops}"
-    )
-
-    csv_df = df[["ThreadID", "Timestamp", "Duration", "GFLOPS"]].copy()
-    csv_df["GFLOPS"] = csv_df["GFLOPS"].apply(lambda x: f"{x:.10f}")
-    csv_df = csv_df.sort_values(
-        ["ThreadID", "Timestamp"],
-        key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
-    )
-
-    output_dir = os.path.dirname(prv_trace_path)
-    csv_filepath = os.path.join(output_dir, "carm_gflops.csv")
-    with open(csv_filepath, "w") as f:
-        f.write(metadata_line + "\n")
-        csv_df.to_csv(f, index=False, header=False, sep="\t")
-
-    print("carm_gflops.csv file written.", flush=True)
-
-    return
 
 
-@app.callback(
-    Input("button-carm-ai", "n_clicks"),
-    Input("graph-lines", "data"),
-    prevent_initial_call=True,
+_register_metric_csv(
+    "button-carm-ai",
+    "Arithmetic_Intensity",
+    "carm_ai.csv",
+    WindowMode.GRADIENT,
+    format_spec=".10f",
 )
-def generate_ai_csv(n_clicks, lines):
-    global full_base_statistics_df, prv_trace_path, time_unit
-    ctx = callback_context
-    if not ctx.triggered:
-        raise PreventUpdate
-
-    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trigger_id != "button-carm-ai":
-        raise PreventUpdate
-
-    if lines is None:
-        print("Graph lines data is None, cannot generate AI CSV.", flush=True)
-        return
-
-    df: pd.DataFrame = full_base_statistics_df.copy()
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    min_ai = df["Arithmetic_Intensity"].min()
-    max_ai = df["Arithmetic_Intensity"].max()
-    metadata_line = (
-        f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.GRADIENT.value}:{min_ai}:{max_ai}"
-    )
-
-    csv_df = df[["ThreadID", "Timestamp", "Duration", "Arithmetic_Intensity"]].copy()
-    csv_df["Arithmetic_Intensity"] = csv_df["Arithmetic_Intensity"].apply(lambda x: f"{x:.10f}")
-    csv_df = csv_df.sort_values(
-        ["ThreadID", "Timestamp"],
-        key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
-    )
-
-    output_dir = os.path.dirname(prv_trace_path)
-    csv_filepath = os.path.join(output_dir, "carm_ai.csv")
-    with open(csv_filepath, "w") as f:
-        f.write(metadata_line + "\n")
-        csv_df.to_csv(f, index=False, header=False, sep="\t")
-
-    print("carm_ai.csv file written.", flush=True)
-
-    return
 
 
 @app.callback(
@@ -2513,7 +2462,6 @@ def generate_roof_proximity_csv(n_clicks, lines):
         return
 
     df: pd.DataFrame = full_base_statistics_df.copy()
-    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     output_dir = os.path.dirname(prv_trace_path)
 
     ai = df["Arithmetic_Intensity"].values
@@ -2551,7 +2499,7 @@ def generate_roof_proximity_csv(n_clicks, lines):
         valid = (ai > 0) & (perf > 0) & (roof_vals > 0)
         ratios = np.where(valid, np.minimum(perf / roof_vals, 1.0), 0.0)
 
-        metadata_line = f"#{timestamp}:CSV:RUNAPP:{prv_trace_path}:{time_unit}:{WindowMode.GRADIENT.value}:0.0:1.0"
+        header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.GRADIENT, 0.0, 1.0)
 
         rel_df = pd.DataFrame(
             {
@@ -2562,19 +2510,11 @@ def generate_roof_proximity_csv(n_clicks, lines):
             }
         )
         rel_df["Ratio"] = rel_df["Ratio"].apply(lambda x: f"{x:.10f}")
-        rel_df = rel_df.sort_values(
-            ["ThreadID", "Timestamp"],
-            key=lambda col: ut.natural_sort_series(col) if col.name == "ThreadID" else col,
-        )
+        rel_df = sort_timestamp_df(rel_df, ut.natural_sort_series)
 
         csv_filepath = os.path.join(output_dir, f"carm_rel_{suffix}.csv")
-        with open(csv_filepath, "w") as f:
-            f.write(metadata_line + "\n")
-            rel_df.to_csv(f, index=False, header=False, sep="\t")
-
+        write_csv_file(rel_df, csv_filepath, header)
         print(f"carm_rel_{suffix}.csv file written.", flush=True)
-
-    return
 
 
 @app.callback(
