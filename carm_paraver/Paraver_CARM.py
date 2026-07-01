@@ -333,6 +333,7 @@ full_base_statistics = {
     "Duration": [],
     "GFLOPS": [],
     "Arithmetic_Intensity": [],
+    "Paraver_Value": [],
     "Paraver_Label": [],
 }
 
@@ -844,6 +845,7 @@ for row in counter_data_df.itertuples(index=False):
         full_base_statistics["GFLOPS"].append(0)
         full_base_statistics["Arithmetic_Intensity"].append(0)
         full_base_statistics["Paraver_Label"].append("")
+        full_base_statistics["Paraver_Value"].append("")
         continue
 
     fp_inst = (
@@ -928,6 +930,7 @@ for row in counter_data_df.itertuples(index=False):
 
             intel_statistics2["Paraver_Label"].append(row.value_label)
             full_base_statistics["Paraver_Label"].append(row.value_label)
+            full_base_statistics["Paraver_Value"].append(row.LegendValue)
         else:
             base_statistics["Paraver_Value"].append("")
             base_statistics["Paraver_Label"].append("No Label")
@@ -936,6 +939,7 @@ for row in counter_data_df.itertuples(index=False):
             base_statistics["B"].append(0)
 
             intel_statistics2["Paraver_Label"].append("")
+            full_base_statistics["Paraver_Value"].append("")
             full_base_statistics["Paraver_Label"].append("")
     else:
         base_statistics["Paraver_Value"].append("")
@@ -946,6 +950,7 @@ for row in counter_data_df.itertuples(index=False):
 
         intel_statistics2["Paraver_Label"].append("")
         full_base_statistics["Paraver_Label"].append("")
+        full_base_statistics["Paraver_Value"].append("")
 
     full_base_statistics["ThreadID"].append(row.ThreadID)
     full_base_statistics["Timestamp"].append(timestamp)
@@ -2273,9 +2278,10 @@ def update_slider_from_csv(
 @app.callback(
     Input("button-roof-labels", "n_clicks"),
     Input("graph-lines", "data"),
+    Input("button-paraver-mask", "n_clicks"),
     prevent_initial_call=True,
 )
-def generate_csv(n_clicks, lines):
+def generate_csv(n_clicks, lines, mask_n_clicks):
     global full_base_statistics_df, prv_trace_path, time_unit
     ctx = callback_context
     if not ctx.triggered:
@@ -2290,7 +2296,12 @@ def generate_csv(n_clicks, lines):
         return
 
     df: pd.DataFrame = full_base_statistics_df.copy()
+    should_mask = mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset)
+    if should_mask:
+        mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
     df["Roof Label"] = df.apply(lambda row: ut.label_cache_level(row, lines), axis=1)
+    if should_mask:
+        df.loc[~mask, "Roof Label"] = 0
 
     header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.CODE, 1, 6)
 
@@ -2320,9 +2331,10 @@ def generate_csv(n_clicks, lines):
     Input("button-carm-ldst-colors", "n_clicks"),
     Input("button-carm-spdp-colors", "n_clicks"),
     Input(component_id="graphs", component_property="figure"),
+    Input("button-paraver-mask", "n_clicks"),
     prevent_initial_call=True,
 )
-def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
+def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph, mask_n_clicks):
     global full_base_statistics_df, prv_trace_path, time_unit, intel_statistics_df2
     ctx = callback_context
     if not ctx.triggered:
@@ -2341,6 +2353,9 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
         )
         unique_percentages = df["Intel_Load_Percent"].dropna().unique()
         df["Intel_Load_Percent"] = df["Intel_Load_Percent"].fillna(0)
+        if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
+            mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
+            df.loc[~mask, "Intel_Load_Percent"] = 0
     elif trigger_id == "button-carm-spdp-colors":
         df = df.merge(
             intel_statistics_df2[["Timestamp", "ThreadID", "Intel_FP_DP_Percent"]],
@@ -2349,6 +2364,9 @@ def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph):
         )
         unique_percentages = df["Intel_FP_DP_Percent"].dropna().unique()
         df["Intel_FP_DP_Percent"] = df["Intel_FP_DP_Percent"].fillna(0)
+        if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
+            mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
+            df.loc[~mask, "Intel_FP_DP_Percent"] = 0
 
     unique_percentages.sort()
     color_map = []
@@ -2399,9 +2417,10 @@ def _register_metric_csv(button_id, value_col, filename, window_mode, format_spe
     @app.callback(
         Input(button_id, "n_clicks"),
         Input("graph-lines", "data"),
+        Input("button-paraver-mask", "n_clicks"),
         prevent_initial_call=True,
     )
-    def _inner(n_clicks, lines):
+    def _inner(n_clicks, lines, mask_n_clicks):
         global full_base_statistics_df, prv_trace_path, time_unit
         ctx = callback_context
         if not ctx.triggered:
@@ -2414,6 +2433,9 @@ def _register_metric_csv(button_id, value_col, filename, window_mode, format_spe
             return
 
         df = full_base_statistics_df.copy()
+        if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
+            mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
+            df.loc[~mask, value_col] = 0.0
         vmin = df[value_col].min()
         vmax = df[value_col].max()
         header = build_csv_metadata_line(prv_trace_path, time_unit, window_mode, vmin, vmax)
@@ -2451,9 +2473,10 @@ _register_metric_csv(
 @app.callback(
     Input("button-carm-roof-proximity", "n_clicks"),
     Input("graph-lines", "data"),
+    Input("button-paraver-mask", "n_clicks"),
     prevent_initial_call=True,
 )
-def generate_roof_proximity_csv(n_clicks, lines):
+def generate_roof_proximity_csv(n_clicks, lines, mask_n_clicks):
     global full_base_statistics_df, prv_trace_path, time_unit
     ctx = callback_context
     if not ctx.triggered:
@@ -2468,6 +2491,9 @@ def generate_roof_proximity_csv(n_clicks, lines):
         return
 
     df: pd.DataFrame = full_base_statistics_df.copy()
+    should_mask = mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset)
+    if should_mask:
+        mask_arr = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v)).values
     output_dir = os.path.dirname(prv_trace_path)
 
     ai = df["Arithmetic_Intensity"].values
@@ -2504,6 +2530,8 @@ def generate_roof_proximity_csv(n_clicks, lines):
 
         valid = (ai > 0) & (perf > 0) & (roof_vals > 0)
         ratios = np.where(valid, np.minimum(perf / roof_vals, 1.0), 0.0)
+        if should_mask:
+            ratios[~mask_arr] = 0.0
 
         header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.GRADIENT, 0.0, 1.0)
 
@@ -2526,9 +2554,10 @@ def generate_roof_proximity_csv(n_clicks, lines):
 @app.callback(
     Input("button-carm-roofline-region", "n_clicks"),
     Input("graph-lines", "data"),
+    Input("button-paraver-mask", "n_clicks"),
     prevent_initial_call=True,
 )
-def generate_roofline_region_csv(n_clicks, lines):
+def generate_roofline_region_csv(n_clicks, lines, mask_n_clicks):
     global full_base_statistics_df, prv_trace_path, time_unit
     ctx = callback_context
     if not ctx.triggered:
@@ -2549,9 +2578,11 @@ def generate_roofline_region_csv(n_clicks, lines):
     df: pd.DataFrame = full_base_statistics_df.copy()
     l1_ridge_x = lines["L1"]["ridge"][0]
     dram_ridge_x = lines["DRAM"]["ridge"][0]
-
     ai = df["Arithmetic_Intensity"].values
     df["Region Label"] = ut.roofline_region_label(ai, l1_ridge_x, dram_ridge_x)
+    if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
+        mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
+        df.loc[~mask, "Region Label"] = 0
 
     header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.CODE, 1, 3)
 
