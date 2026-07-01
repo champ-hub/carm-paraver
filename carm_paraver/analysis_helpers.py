@@ -933,3 +933,10 @@ def write_csv_file(csv_df: pd.DataFrame, filepath: str, metadata_line: str) -> N
     with open(filepath, "w") as f:
         f.write(metadata_line + "\n")
         csv_df.to_csv(f, index=False, header=False, sep="\t")
+
+
+def write_legend_csv(filepath: str, legend_rows: list[tuple[int, str, int, int, int]]) -> None:
+    """Write a Paraver legend file (code -> RGB mapping)."""
+    with open(filepath, "w") as f:
+        for code, label, r, g, b in legend_rows:
+            f.write(f'{code} "{label}",{r},{g},{b}\n')

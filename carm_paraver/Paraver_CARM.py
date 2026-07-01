@@ -63,6 +63,7 @@ from .analysis_helpers import (
     should_reset_annotations_for_lines,
     sort_timestamp_df,
     write_csv_file,
+    write_legend_csv,
 )
 
 
@@ -2275,58 +2276,6 @@ def update_slider_from_csv(
             return new_slider_indices, new_slider_indices, new_timestamps
 
 
-@app.callback(
-    Input("button-roof-labels", "n_clicks"),
-    Input("graph-lines", "data"),
-    Input("button-paraver-mask", "n_clicks"),
-    prevent_initial_call=True,
-)
-def generate_csv(n_clicks, lines, mask_n_clicks):
-    global full_base_statistics_df, prv_trace_path, time_unit
-    ctx = callback_context
-    if not ctx.triggered:
-        raise PreventUpdate
-
-    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trigger_id != "button-roof-labels":
-        raise PreventUpdate
-
-    if lines is None:
-        print("Graph lines data is None, cannot generate roof labels CSV.", flush=True)
-        return
-
-    df: pd.DataFrame = full_base_statistics_df.copy()
-    should_mask = mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset)
-    if should_mask:
-        mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
-    df["Roof Label"] = df.apply(lambda row: ut.label_cache_level(row, lines), axis=1)
-    if should_mask:
-        df.loc[~mask, "Roof Label"] = 0
-
-    header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.CODE, 1, 6)
-
-    csv_df = df[["ThreadID", "Timestamp", "Duration", "Roof Label"]]
-    csv_df = sort_timestamp_df(csv_df, ut.natural_sort_series)
-
-    output_dir = os.path.dirname(prv_trace_path)
-    write_csv_file(csv_df, os.path.join(output_dir, "carm_roofs.csv"), header)
-
-    roof_labels_filepath = os.path.join(output_dir, "carm_roofs.legend.csv")
-    labels_data = [
-        [1, "L1", 0, 255, 0],  # Green
-        [2, "L2", 0, 0, 255],  # Blue
-        [3, "L3", 255, 165, 0],  # Orange
-        [4, "DRAM", 255, 0, 0],  # Red
-        [5, "No Floating Point Operations Found", 75, 0, 130],  # Indigo
-        [6, "Above L1", 255, 192, 203],  # Pink
-    ]
-    with open(roof_labels_filepath, "w") as f:
-        for row in labels_data:
-            label_line = f'{row[0]} "{row[1]}",{row[2]},{row[3]},{row[4]}\n'
-            f.write(label_line)
-    print("carm_roofs.csv file written.", flush=True)
-
-
 def _register_metric_csv(button_id, value_col, filename, window_mode, format_spec=None, merge_source_attr=None):
     """Register a Dash callback that exports a single-column metric CSV.
 
@@ -2381,6 +2330,135 @@ def _register_metric_csv(button_id, value_col, filename, window_mode, format_spe
         print(f"{filename} written.", flush=True)
 
     return _inner
+
+
+def _register_label_csv(
+    button_id,
+    label_col,
+    filename,
+    label_fn,
+    legend_rows,
+    code_min,
+    code_max,
+    *,
+    required_levels=None,
+):
+    """Register a Dash callback that exports a discrete-code (CODE mode) CSV
+    with a paired legend file.
+
+    Parameters
+    ----------
+    button_id, label_col, filename
+        The triggering button, column name written into the CSV, and output file.
+    label_fn
+        Callable ``(df, lines) → array-like`` of integer codes assigned to
+        ``df[label_col]``.
+    legend_rows
+        List of ``(code, label, r, g, b)`` tuples for the ``.legend.csv`` file.
+    code_min, code_max
+        Bounds written into the CSV header (typically 1 and the number of classes).
+    required_levels
+        If set, each level name must be a key in ``lines`` or the callback prints
+        a warning and returns early.
+    """
+
+    @app.callback(
+        Input(button_id, "n_clicks"),
+        Input("graph-lines", "data"),
+        Input("button-paraver-mask", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def _inner(n_clicks, lines, mask_n_clicks):
+        global full_base_statistics_df, prv_trace_path, time_unit
+        ctx = callback_context
+        if not ctx.triggered:
+            raise PreventUpdate
+        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        if trigger_id != button_id:
+            raise PreventUpdate
+        if lines is None:
+            print(f"Graph lines data is None, cannot generate {filename}.", flush=True)
+            return
+
+        if required_levels:
+            missing = [lvl for lvl in required_levels if lvl not in lines]
+            if missing:
+                print(
+                    f"Required roof level(s) {missing} missing from graph lines, cannot generate {filename}.",
+                    flush=True,
+                )
+                return
+
+        df = full_base_statistics_df.copy()
+        if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
+            mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
+        else:
+            mask = None
+
+        df[label_col] = label_fn(df, lines)
+
+        if mask is not None:
+            df.loc[~mask, label_col] = 0
+
+        header = build_csv_metadata_line(
+            prv_trace_path,
+            time_unit,
+            WindowMode.CODE,
+            code_min,
+            code_max,
+        )
+        csv_df = df[["ThreadID", "Timestamp", "Duration", label_col]]
+        csv_df = sort_timestamp_df(csv_df, ut.natural_sort_series)
+
+        output_dir = os.path.dirname(prv_trace_path)
+        write_csv_file(csv_df, os.path.join(output_dir, filename), header)
+
+        legend_filename = filename.replace(".csv", ".legend.csv")
+        write_legend_csv(
+            os.path.join(output_dir, legend_filename),
+            legend_rows,
+        )
+        print(f"{filename} file written.", flush=True)
+
+    return _inner
+
+
+_register_label_csv(
+    "button-roof-labels",
+    "Roof Label",
+    "carm_roofs.csv",
+    lambda df, lines: df.apply(lambda row: ut.label_cache_level(row, lines), axis=1),
+    [
+        (1, "L1", 0, 255, 0),
+        (2, "L2", 0, 0, 255),
+        (3, "L3", 255, 165, 0),
+        (4, "DRAM", 255, 0, 0),
+        (5, "No Floating Point Operations Found", 75, 0, 130),
+        (6, "Above L1", 255, 192, 203),
+    ],
+    1,
+    6,
+)
+
+
+_register_label_csv(
+    "button-carm-roofline-region",
+    "Region Label",
+    "carm_roofline_region.csv",
+    lambda df, lines: ut.roofline_region_label(
+        df["Arithmetic_Intensity"].values,
+        lines["L1"]["ridge"][0],
+        lines["DRAM"]["ridge"][0],
+    ),
+    [
+        (1, "Memory Bound", 0, 0, 255),
+        (2, "Mixed", 128, 0, 128),
+        (3, "Compute Bound", 255, 0, 0),
+    ],
+    1,
+    3,
+    required_levels=["L1", "DRAM"],
+)
 
 
 _register_metric_csv(
@@ -2498,59 +2576,6 @@ def generate_roof_proximity_csv(n_clicks, lines, mask_n_clicks):
         csv_filepath = os.path.join(output_dir, f"carm_rel_{suffix}.csv")
         write_csv_file(rel_df, csv_filepath, header)
         print(f"carm_rel_{suffix}.csv file written.", flush=True)
-
-
-@app.callback(
-    Input("button-carm-roofline-region", "n_clicks"),
-    Input("graph-lines", "data"),
-    Input("button-paraver-mask", "n_clicks"),
-    prevent_initial_call=True,
-)
-def generate_roofline_region_csv(n_clicks, lines, mask_n_clicks):
-    global full_base_statistics_df, prv_trace_path, time_unit
-    ctx = callback_context
-    if not ctx.triggered:
-        raise PreventUpdate
-
-    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trigger_id != "button-carm-roofline-region":
-        raise PreventUpdate
-
-    if lines is None:
-        print("Graph lines data is None, cannot generate roofline region CSV.", flush=True)
-        return
-
-    if "L1" not in lines or "DRAM" not in lines:
-        print("L1 or DRAM roof missing from graph lines, cannot determine roofline regions.", flush=True)
-        return
-
-    df: pd.DataFrame = full_base_statistics_df.copy()
-    l1_ridge_x = lines["L1"]["ridge"][0]
-    dram_ridge_x = lines["DRAM"]["ridge"][0]
-    ai = df["Arithmetic_Intensity"].values
-    df["Region Label"] = ut.roofline_region_label(ai, l1_ridge_x, dram_ridge_x)
-    if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
-        mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
-        df.loc[~mask, "Region Label"] = 0
-
-    header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.CODE, 1, 3)
-
-    csv_df = df[["ThreadID", "Timestamp", "Duration", "Region Label"]]
-    csv_df = sort_timestamp_df(csv_df, ut.natural_sort_series)
-
-    output_dir = os.path.dirname(prv_trace_path)
-    write_csv_file(csv_df, os.path.join(output_dir, "carm_roofline_region.csv"), header)
-
-    region_legend_filepath = os.path.join(output_dir, "carm_roofline_region.legend.csv")
-    labels_data = [
-        [1, "Memory Bound", 0, 0, 255],  # Blue
-        [2, "Mixed", 128, 0, 128],  # Purple
-        [3, "Compute Bound", 255, 0, 0],  # Red
-    ]
-    with open(region_legend_filepath, "w") as f:
-        for row in labels_data:
-            f.write(f'{row[0]} "{row[1]}",{row[2]},{row[3]},{row[4]}\n')
-    print("carm_roofline_region.csv file written.", flush=True)
 
 
 @app.callback(
