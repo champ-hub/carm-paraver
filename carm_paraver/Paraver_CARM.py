@@ -1538,6 +1538,12 @@ sidebar2 = dbc.Offcanvas(
             "perfect optimization would achieve a 5x speedup. A value of 1.0 means the timestamp is at or above the "
             "performance roof.",
         ),
+        _carm_btn(
+            "Send Roofline Region",
+            "button-carm-roofline-region",
+            "Labels each timestamp based on which roofline region it falls in: Memory Bound (left of the L1 ridge "
+            "point), Mixed (between the L1 and DRAM ridge points), or Compute Bound (right of the DRAM ridge point).",
+        ),
     ],
     id="offcanvas2",
     title=html.H5("Paraver Functions", style={"color": "white", "fontsize": "30px"}),
@@ -2515,6 +2521,56 @@ def generate_roof_proximity_csv(n_clicks, lines):
         csv_filepath = os.path.join(output_dir, f"carm_rel_{suffix}.csv")
         write_csv_file(rel_df, csv_filepath, header)
         print(f"carm_rel_{suffix}.csv file written.", flush=True)
+
+
+@app.callback(
+    Input("button-carm-roofline-region", "n_clicks"),
+    Input("graph-lines", "data"),
+    prevent_initial_call=True,
+)
+def generate_roofline_region_csv(n_clicks, lines):
+    global full_base_statistics_df, prv_trace_path, time_unit
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+
+    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger_id != "button-carm-roofline-region":
+        raise PreventUpdate
+
+    if lines is None:
+        print("Graph lines data is None, cannot generate roofline region CSV.", flush=True)
+        return
+
+    if "L1" not in lines or "DRAM" not in lines:
+        print("L1 or DRAM roof missing from graph lines, cannot determine roofline regions.", flush=True)
+        return
+
+    df: pd.DataFrame = full_base_statistics_df.copy()
+    l1_ridge_x = lines["L1"]["ridge"][0]
+    dram_ridge_x = lines["DRAM"]["ridge"][0]
+
+    ai = df["Arithmetic_Intensity"].values
+    df["Region Label"] = ut.roofline_region_label(ai, l1_ridge_x, dram_ridge_x)
+
+    header = build_csv_metadata_line(prv_trace_path, time_unit, WindowMode.CODE, 1, 3)
+
+    csv_df = df[["ThreadID", "Timestamp", "Duration", "Region Label"]]
+    csv_df = sort_timestamp_df(csv_df, ut.natural_sort_series)
+
+    output_dir = os.path.dirname(prv_trace_path)
+    write_csv_file(csv_df, os.path.join(output_dir, "carm_roofline_region.csv"), header)
+
+    region_legend_filepath = os.path.join(output_dir, "carm_roofline_region.legend.csv")
+    labels_data = [
+        [1, "Memory Bound", 0, 0, 255],  # Blue
+        [2, "Mixed", 128, 0, 128],  # Purple
+        [3, "Compute Bound", 255, 0, 0],  # Red
+    ]
+    with open(region_legend_filepath, "w") as f:
+        for row in labels_data:
+            f.write(f'{row[0]} "{row[1]}",{row[2]},{row[3]},{row[4]}\n')
+    print("carm_roofline_region.csv file written.", flush=True)
 
 
 @app.callback(

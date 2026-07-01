@@ -357,6 +357,16 @@ def label_cache_level(row, roofs):
     return 6  # Not below any roof
 
 
+def roofline_region_label(ai, l1_ridge_x, dram_ridge_x):
+    """Label arithmetic intensity values by roofline region.
+
+    Returns 1 for Memory Bound (ai < l1_ridge_x),
+            2 for Mixed (l1_ridge_x <= ai <= dram_ridge_x),
+            3 for Compute Bound (ai > dram_ridge_x).
+    """
+    return np.where(ai < l1_ridge_x, 1, np.where(ai <= dram_ridge_x, 2, 3))
+
+
 def calculate_roofline(values, min_ai):
     aidots = [0] * 3
     FPaidots = [0] * 2
