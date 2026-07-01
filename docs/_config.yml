@@ -1,0 +1,20 @@
+title: CARM-Paraver
+description: Cache-Aware Roofline Model analysis for Paraver traces
+remote_theme: just-the-docs/just-the-docs
+plugins:
+  - jekyll-remote-theme
+
+# Just the Docs settings
+logo: "https://raw.githubusercontent.com/champ-hub/carm-paraver/dev/carm_paraver/assets/CHAMP_logo.svg"
+favicon_ico: "https://raw.githubusercontent.com/champ-hub/carm-paraver/dev/carm_paraver/assets/CARM_icon3.svg"
+
+aux_links:
+  "CARM-Paraver on GitHub":
+    - "https://github.com/champ-hub/carm-paraver"
+
+footer_content: "Copyright &copy; CHAMP-Hub. Distributed under an LGPL 2.1 license."
+
+# Enable search
+search_enabled: true
+
+color_scheme: dark
