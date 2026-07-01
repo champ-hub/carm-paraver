@@ -2327,91 +2327,14 @@ def generate_csv(n_clicks, lines, mask_n_clicks):
     print("carm_roofs.csv file written.", flush=True)
 
 
-@app.callback(
-    Input("button-carm-ldst-colors", "n_clicks"),
-    Input("button-carm-spdp-colors", "n_clicks"),
-    Input(component_id="graphs", component_property="figure"),
-    Input("button-paraver-mask", "n_clicks"),
-    prevent_initial_call=True,
-)
-def generate_color_csv(n_clicks_ldst, n_clicks_spdp, graph, mask_n_clicks):
-    global full_base_statistics_df, prv_trace_path, time_unit, intel_statistics_df2
-    ctx = callback_context
-    if not ctx.triggered:
-        raise PreventUpdate
-    trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trigger_id not in ["button-carm-ldst-colors", "button-carm-spdp-colors"]:
-        raise PreventUpdate
-
-    df = full_base_statistics_df.copy()
-
-    if trigger_id == "button-carm-ldst-colors":
-        df = df.merge(
-            intel_statistics_df2[["Timestamp", "ThreadID", "Intel_Load_Percent"]],
-            on=["Timestamp", "ThreadID"],
-            how="left",
-        )
-        unique_percentages = df["Intel_Load_Percent"].dropna().unique()
-        df["Intel_Load_Percent"] = df["Intel_Load_Percent"].fillna(0)
-        if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
-            mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
-            df.loc[~mask, "Intel_Load_Percent"] = 0
-    elif trigger_id == "button-carm-spdp-colors":
-        df = df.merge(
-            intel_statistics_df2[["Timestamp", "ThreadID", "Intel_FP_DP_Percent"]],
-            on=["Timestamp", "ThreadID"],
-            how="left",
-        )
-        unique_percentages = df["Intel_FP_DP_Percent"].dropna().unique()
-        df["Intel_FP_DP_Percent"] = df["Intel_FP_DP_Percent"].fillna(0)
-        if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
-            mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
-            df.loc[~mask, "Intel_FP_DP_Percent"] = 0
-
-    unique_percentages.sort()
-    color_map = []
-
-    for percentage in unique_percentages:
-        if trigger_id == "button-carm-ldst-colors":
-            r, g, b = ut.blend_colors(0, 0, 0, 0, 0, percentage, 0, "LD/ST Percentage", True)
-            extra_string = "Loads"
-
-        elif trigger_id == "button-carm-spdp-colors":
-            r, g, b = ut.blend_colors(0, 0, 0, 0, percentage, 0, 0, "Precision", True)
-            extra_string = "DP"
-
-        color_map.append(
-            {
-                "percentage": percentage,
-                "percentage_string": f"{percentage}% {extra_string}",
-                "r": r,
-                "g": g,
-                "b": b,
-            }
-        )
-
-    color_map_df = pd.DataFrame(color_map)
-    output_dir = os.path.dirname(prv_trace_path)
-    ut.format_ld_st_csv(color_map_df, os.path.join(output_dir, "carm_colors.legend.csv"))
-
-    header = build_csv_metadata_line(
-        prv_trace_path,
-        time_unit,
-        WindowMode.CODE,
-        color_map_df["percentage"].min(),
-        color_map_df["percentage"].max(),
-    )
-
-    value_col = "Intel_Load_Percent" if trigger_id == "button-carm-ldst-colors" else "Intel_FP_DP_Percent"
-    csv_df = sort_timestamp_df(df[["ThreadID", "Timestamp", "Duration", value_col]], ut.natural_sort_series)
-    write_csv_file(csv_df, os.path.join(output_dir, "carm_colors.csv"), header)
-    print("carm_colors.csv file written.", flush=True)
-
-
-def _register_metric_csv(button_id, value_col, filename, window_mode, format_spec=None):
+def _register_metric_csv(button_id, value_col, filename, window_mode, format_spec=None, merge_source_attr=None):
     """Register a Dash callback that exports a single-column metric CSV.
 
     Handles the standard guard pattern, metadata header, sort, and file write.
+
+    When ``merge_source_attr`` names a module global (e.g. ``intel_statistics_df2``),
+    ``value_col`` is merged in from that DataFrame on (Timestamp, ThreadID) and
+    NaN-filled to 0 before the header vmin/vmax is computed.
     """
 
     @app.callback(
@@ -2433,6 +2356,14 @@ def _register_metric_csv(button_id, value_col, filename, window_mode, format_spe
             return
 
         df = full_base_statistics_df.copy()
+        if merge_source_attr:
+            source_df = globals()[merge_source_attr]
+            df = df.merge(
+                source_df[["Timestamp", "ThreadID", value_col]],
+                on=["Timestamp", "ThreadID"],
+                how="left",
+            )
+            df[value_col] = df[value_col].fillna(0)
         if mask_button_offset != -1 and resolve_toggle_enabled(mask_n_clicks, mask_button_offset):
             mask = df["Paraver_Value"].apply(lambda v: should_plot_timestamp_point(True, v))
             df.loc[~mask, value_col] = 0.0
@@ -2467,6 +2398,24 @@ _register_metric_csv(
     "carm_ai.csv",
     WindowMode.GRADIENT,
     format_spec=".10f",
+)
+
+
+_register_metric_csv(
+    "button-carm-ldst-colors",
+    "Intel_Load_Percent",
+    "carm_ldst_percent.csv",
+    WindowMode.GRADIENT,
+    merge_source_attr="intel_statistics_df2",
+)
+
+
+_register_metric_csv(
+    "button-carm-spdp-colors",
+    "Intel_FP_DP_Percent",
+    "carm_spdp_percent.csv",
+    WindowMode.GRADIENT,
+    merge_source_attr="intel_statistics_df2",
 )
 
 

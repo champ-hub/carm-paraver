@@ -863,15 +863,3 @@ def process_group(group_rows):
         "g": group_rows[0]["g"],
         "b": group_rows[0]["b"],
     }
-
-
-def format_ld_st_csv(color_map_df, output_path):
-    with open(output_path, "w") as f:
-        for _, row in color_map_df.iterrows():
-            ratio = row["percentage"]
-            label = row["percentage_string"]
-            r, g, b = row["r"], row["g"], row["b"]
-            ratio_str = f"{ratio}"
-
-            line = f'{ratio_str} "{label}",{r},{g},{b}\n'
-            f.write(line)
